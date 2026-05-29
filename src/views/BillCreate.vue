@@ -160,7 +160,7 @@ function addExtra() {
 async function saveBill(status) {
   if (!form.tenantId) return alert('请选择租客')
   const t = tenants.value.find(x => String(x.id) === String(form.tenantId))
-  const baseId = Date.now()
+  let baseId = Date.now()
   const today = new Date().toISOString()
   const bills = []
 
