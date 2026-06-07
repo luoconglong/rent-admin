@@ -15,7 +15,8 @@ export const globalRemindDays = ref(3)
 
 export const stats = reactive({
   houseCount: 0, roomCount: 0, rentingCount: 0, ownerCount: 0,
-  pendingCount: 0, urgentCount: 0, pendingRent: '0', pendingPay: '0', expiringCount: 0
+  pendingCount: 0, urgentCount: 0, pendingRent: '0', pendingPay: '0', expiringCount: 0,
+  vacantCount: 0, monthIncome: '0', todayExpire: 0
 })
 
 export const memoUnread = ref(0)
@@ -107,6 +108,27 @@ export function calcStats() {
   stats.pendingRent = pendingTotal.toFixed(2)
   stats.pendingPay = pendingPayTotal.toFixed(2)
   stats.expiringCount = expiringCount
+  stats.vacantCount = rooms.value.filter(r => r.status === 'vacant').length
+
+  const cm = today.getMonth() + 1; const cy = today.getFullYear()
+  let mi = 0
+  for (const b of bills.value) {
+    if (b.status === 'paid' && b.paid_time) {
+      const d = new Date(b.paid_time)
+      if (d.getFullYear() === cy && d.getMonth() + 1 === cm) mi += b.paid_amount || 0
+    }
+  }
+  stats.monthIncome = mi.toFixed(2)
+
+  let td = 0
+  for (const t of tenants.value) {
+    if (t.status === 'renting' && t.end_date) {
+      const ed = new Date(t.end_date); ed.setHours(0,0,0,0)
+      if (ed.getTime() === today.getTime()) td++
+    }
+  }
+  stats.todayExpire = td
+
   expiringList.value = nowExpiring
   urgentBills.value = nowUrgentBills
   memoUnread.value = memos.value.length
@@ -143,17 +165,11 @@ export async function loadAll() {
   propertySettings.value = ps.status === 'fulfilled' ? (ps.value.data || []) : []
   memos.value = memo.status === 'fulfilled' ? (memo.value.data || []) : []
 
-  // 打印每个查询状态
-  console.log('houses:', houses.value.length, 'rooms:', rooms.value.length, 'tenants:', tenants.value.length,
-    'bills:', bills.value.length, 'meters:', meters.value.length, 'expends:', expends.value.length,
-    'owners:', owners.value.length, 'memos:', memos.value.length)
-
   if (b.status === 'rejected') console.error('bills 查询失败:', b.reason)
   if (e.status === 'rejected') console.error('expends 查询失败:', e.reason)
 
   const { data: settings } = await supabase.from('settings').select('*').eq('key', 'globalRemindDays').single()
   if (settings) globalRemindDays.value = Number(settings.value) || 3
 
-  console.log('✅ 数据加载完成', houses.value.length, rooms.value.length, tenants.value.length)
   calcStats()
 }

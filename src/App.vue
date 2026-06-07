@@ -1,5 +1,6 @@
 <template>
-  <div id="app">
+  <Login v-if="!isLoggedIn" />
+  <div id="app" v-else>
     <header class="header">
       <div class="logo">🏢 租务小帮手</div>
       <div class="header-right">
@@ -20,15 +21,20 @@
 
       <section class="content">
         <Dashboard v-if="current === 'dashboard'" />
-        <Houses v-if="current === 'rooms'" @openDialog="openDialog" />
-        <Tenants v-if="current === 'tenants'" @openCheckout="checkoutId = $event" @openCheckin="showCheckin = true" />
+        <Houses v-if="current === 'rooms'" @openDetail="detailId = $event" @openCheckin="openCheckin" @openCheckout="doCheckout" />
+        <Tenants v-if="current === 'tenants'" @openDetail="detailId = $event" @openCheckout="doCheckout" @openCheckin="openCheckin" />
         <Bills v-if="current === 'bills'" @openBillCreate="showBillCreate = true" />
         <Meters v-if="current === 'meters'" @openDialog="openDialog" @openCharge="showMeterCharge = true" @openDeduct="showMeterDeduct = true" @openRemain="showMeterRemain = true" @openDing="showDingBalance = true" @openProperty="showPropertySettings = true" />
+        <PayManage v-if="current === 'paymanage'" />
+        <MeterRank v-if="current === 'meterrank'" />
         <Unified v-if="current === 'unified'" />
+        <Expends v-if="current === 'expends'" />
         <Owners v-if="current === 'owners'" @openDialog="openDialog" @openOwnerPay="showOwnerPay = true" />
-        <PropertyPay v-if="current === 'propertyPay'" @openPropertySettings="showPropertySettings = true" />
         <Reports v-if="current === 'reports'" />
-        <Contracts v-if="current === 'contracts'" />
+        <Contracts v-if="current === 'contracts'" @print="showPrintContract = $event" />
+        <Memos v-if="current === 'memos'" />
+        <TenantSelf v-if="current === 'tenantself'" />
+        <CheckoutPage v-if="current === 'checkout'" :tenantId="checkoutTenantId" @close="current = 'dashboard'" />
         <Settings v-if="current === 'settings'" />
       </section>
     </div>
@@ -50,8 +56,8 @@
       </div>
     </div>
 
-    <Checkin v-if="showCheckin" @close="showCheckin = false; loadAll()" />
-    <Checkout v-if="checkoutId" :tenantId="checkoutId" @close="checkoutId = null; loadAll()" />
+    <Checkin v-if="showCheckin" :roomId="checkinRoomId" @close="showCheckin = false; loadAll()" />
+    <TenantDetail v-if="detailId" :tenantId="detailId" @close="detailId = null" @billCreate="showBillCreate = true" />
     <BillCreate v-if="showBillCreate" :tenantId="detailId" @close="showBillCreate = false; loadAll()" />
     <MeterCharge v-if="showMeterCharge" @close="showMeterCharge = false; loadAll()" />
     <MeterDeduct v-if="showMeterDeduct" @close="showMeterDeduct = false; loadAll()" />
@@ -59,6 +65,7 @@
     <PropertySettings v-if="showPropertySettings" @close="showPropertySettings = false; loadAll()" />
     <OwnerPay v-if="showOwnerPay" @close="showOwnerPay = false; loadAll()" />
     <DingBalance v-if="showDingBalance" @close="showDingBalance = false" />
+    <PrintContract v-if="showPrintContract" :contract="showPrintContract" @close="showPrintContract = null" />
   </div>
 </template>
 
@@ -66,30 +73,39 @@
 import { ref, reactive, onMounted } from 'vue'
 import { houses, rooms, loadAll } from './stores/data.js'
 import { supabase } from './supabase.js'
+import Login from './views/Login.vue'
 import Dashboard from './views/Dashboard.vue'
 import Houses from './views/Houses.vue'
 import Tenants from './views/Tenants.vue'
+import TenantDetail from './views/TenantDetail.vue'
 import Bills from './views/Bills.vue'
 import BillCreate from './views/BillCreate.vue'
 import Meters from './views/Meters.vue'
+import PayManage from './views/PayManage.vue'
+import MeterRank from './views/MeterRank.vue'
 import MeterCharge from './views/MeterCharge.vue'
 import MeterDeduct from './views/MeterDeduct.vue'
 import MeterRemain from './views/MeterRemain.vue'
 import Unified from './views/Unified.vue'
+import Expends from './views/Expends.vue'
 import PropertySettings from './views/PropertySettings.vue'
-import PropertyPay from './views/PropertyPay.vue'
 import Owners from './views/Owners.vue'
 import OwnerPay from './views/OwnerPay.vue'
 import Reports from './views/Reports.vue'
 import Contracts from './views/Contracts.vue'
+import PrintContract from './views/PrintContract.vue'
+import Memos from './views/Memos.vue'
+import TenantSelf from './views/TenantSelf.vue'
+import CheckoutPage from './views/CheckoutPage.vue'
 import DingBalance from './views/DingBalance.vue'
 import Settings from './views/Settings.vue'
 import Checkin from './views/Checkin.vue'
-import Checkout from './views/Checkout.vue'
 
 const current = ref('dashboard')
 const showCheckin = ref(false)
-const checkoutId = ref(null)
+const checkinRoomId = ref(null)
+const checkoutTenantId = ref(null)
+const detailId = ref(null)
 const showBillCreate = ref(false)
 const showMeterCharge = ref(false)
 const showMeterDeduct = ref(false)
@@ -97,6 +113,18 @@ const showMeterRemain = ref(false)
 const showPropertySettings = ref(false)
 const showOwnerPay = ref(false)
 const showDingBalance = ref(false)
+const showPrintContract = ref(null)
+const isLoggedIn = ref(false)
+
+function openCheckin(roomId) {
+  checkinRoomId.value = String(roomId)
+  showCheckin.value = true
+}
+
+function doCheckout(tenantId) {
+  checkoutTenantId.value = String(tenantId)
+  current.value = 'checkout'
+}
 
 const menus = [
   { key: 'dashboard', label: '首页看板', icon: '📊' },
@@ -104,11 +132,15 @@ const menus = [
   { key: 'tenants', label: '租客管理', icon: '🧑‍🤝‍🧑' },
   { key: 'bills', label: '账单管理', icon: '💰' },
   { key: 'meters', label: '水电物业', icon: '⚡' },
-  { key: 'unified', label: '统一抄表', icon: '📝' },
+  { key: 'paymanage', label: '缴费管理', icon: '🔧' },
+  { key: 'meterrank', label: '抄表排行', icon: '📊' },
+  { key: 'unified', label: '统一抄表', icon: '📋' },
+  { key: 'expends', label: '支出明细', icon: '💸' },
   { key: 'owners', label: '业主管理', icon: '🏢' },
-  { key: 'propertyPay', label: '物业费', icon: '🧾' },
   { key: 'reports', label: '报表', icon: '📈' },
   { key: 'contracts', label: '电子合同', icon: '📄' },
+  { key: 'memos', label: '备忘提醒', icon: '📝' },
+  { key: 'tenantself', label: '租客自助', icon: '👤' },
   { key: 'settings', label: '设置', icon: '⚙️' },
 ]
 
@@ -118,35 +150,8 @@ function openDialog(type) {
   dialog.form = {}
   if (type === 'house') {
     dialog.title = '添加楼栋'
-    dialog.fields = [
-      { key: 'address', label: '楼栋名称', placeholder: '如: 21栋' },
-      { key: 'detail_address', label: '详细地址', placeholder: '如: 长沙市长沙县高峰汽配城东区21栋' }
-    ]
-    dialog.onConfirm = async () => {
-      await supabase.from('houses').insert({ 
-        address: dialog.form.address,
-        detail_address: dialog.form.detail_address || ''
-      })
-      dialog.show = false; loadAll()
-    }
-  } else if (type === 'room') {
-    dialog.title = '添加房间'
-    dialog.fields = [
-      { key: 'house_id', label: '所属楼栋', type: 'select', options: houses.value.map(h => ({ value: h.id, label: h.address })) },
-      { key: 'room_no', label: '房间号', placeholder: '101' },
-      { key: 'rent_amount', label: '月租金', type: 'number', placeholder: '0' },
-      { key: 'deposit', label: '押金', type: 'number', placeholder: '0' },
-    ]
-    dialog.onConfirm = async () => {
-      await supabase.from('rooms').insert({
-        house_id: Number(dialog.form.house_id),
-        room_no: dialog.form.room_no,
-        rent_amount: Number(dialog.form.rent_amount) || 0,
-        deposit: Number(dialog.form.deposit) || 0,
-        status: '空置'
-      })
-      dialog.show = false; loadAll()
-    }
+    dialog.fields = [{ key: 'address', label: '楼栋名称', placeholder: '如: 幸福小区A栋' }]
+    dialog.onConfirm = async () => { await supabase.from('houses').insert({ address: dialog.form.address }); dialog.show = false; loadAll() }
   } else if (type === 'meter') {
     dialog.title = '添加表具'
     dialog.fields = [
@@ -154,15 +159,11 @@ function openDialog(type) {
       { key: 'type', label: '类型', type: 'select', options: [{ value: '电表', label: '电表' }, { value: '水表', label: '水表' }] },
       { key: 'current_reading', label: '当前读数', type: 'number' },
     ]
-    dialog.onConfirm = async () => {
-      await supabase.from('meters').insert({ room_id: dialog.form.room_id, type: dialog.form.type, current_reading: Number(dialog.form.current_reading) })
-      dialog.show = false; loadAll()
-    }
+    dialog.onConfirm = async () => { await supabase.from('meters').insert({ room_id: dialog.form.room_id, type: dialog.form.type, current_reading: Number(dialog.form.current_reading) }); dialog.show = false; loadAll() }
   } else if (type === 'owner') {
     dialog.title = '添加业主'
     dialog.fields = [
-      { key: 'name', label: '姓名' },
-      { key: 'phone', label: '手机号' },
+      { key: 'name', label: '姓名' }, { key: 'phone', label: '手机号' },
       { key: 'monthly_rent', label: '月租金', type: 'number' },
       { key: 'rent_cycle', label: '付款周期', type: 'select', options: [{ value: '月付', label: '月付' }, { value: '季付', label: '季付' }, { value: '年付', label: '年付' }] },
       { key: 'payment_day', label: '付款日', type: 'number', placeholder: '1' },
@@ -170,22 +171,29 @@ function openDialog(type) {
     ]
     dialog.onConfirm = async () => {
       const f = dialog.form
-      await supabase.from('owners').insert({
-        name: f.name, phone: f.phone,
-        monthly_rent: Number(f.monthly_rent) || 0,
-        rent_cycle: f.rent_cycle || '月付',
-        payment_day: Number(f.payment_day) || 1,
-        start_month: Number(f.start_month) || 1
-      })
+      await supabase.from('owners').insert({ name: f.name, phone: f.phone, monthly_rent: Number(f.monthly_rent) || 0, rent_cycle: f.rent_cycle || '月付', payment_day: Number(f.payment_day) || 1, start_month: Number(f.start_month) || 1 })
       dialog.show = false; loadAll()
     }
   }
   dialog.show = true
 }
 
-function handleLogout() { alert('已退出') }
+function handleLogout() {
+  supabase.auth.signOut()
+  isLoggedIn.value = false
+}
 
-onMounted(() => { loadAll() })
+onMounted(async () => {
+  const { data } = await supabase.auth.getSession()
+  isLoggedIn.value = !!data.session
+  if (isLoggedIn.value) loadAll()
+
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('page') === 'checkout') {
+    current.value = 'checkout'
+    checkoutTenantId.value = params.get('tenantId')
+  }
+})
 </script>
 
 <style>

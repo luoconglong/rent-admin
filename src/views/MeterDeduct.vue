@@ -55,9 +55,9 @@ function switchType(type) {
   loadLast()
 }
 
-async function loadLast() {
-  const list = meters.value.filter(m => m.type === meterType.value)
-  lastReading.value = list.length ? (list[list.length - 1].currentreading || 0) : 0
+function loadLast() {
+  const list = meters.value.filter(m => m.type === meterType.value && m.source === 'landlord')
+  lastReading.value = list.length ? (list[list.length - 1].current_reading || 0) : 0
   records.value = [...list].reverse().slice(0, 10)
   calc()
 }
@@ -75,20 +75,19 @@ async function save() {
   if (!isFirst && curr <= last) return alert('本期读数需大于上期')
 
   await supabase.from('meters').insert({
-    id: Date.now().toString(),
     type: meterType.value,
     date: meterDate.value,
-    lastreading: last,
-    currentreading: curr,
+    last_reading: last,
+    current_reading: curr,
     usage: usage.value,
-    unitprice: unitPrice.value,
-    amount: amount.value
+    unit_price: unitPrice.value,
+    amount: amount.value,
+    source: 'landlord'
   })
 
   await supabase.from('expends').insert({
-    id: Date.now().toString() + '_exp',
     type: meterType.value === 'water' ? '💧水费扣费' : '⚡电费扣费',
-    amount: amount.value, isincome: false,
+    amount: amount.value, is_income: false,
     time: meterDate.value
   })
 

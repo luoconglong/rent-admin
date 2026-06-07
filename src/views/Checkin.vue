@@ -1,5 +1,3 @@
-<!-- src/views/Checkin.vue -->
-
 <template>
   <div class="mask" @click.self="$emit('close')">
     <div class="dialog" style="width:520px;max-height:90vh;overflow-y:auto">
@@ -85,10 +83,11 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { houses, rooms, loadAll } from '../stores/data.js'
 import { supabase } from '../supabase.js'
 
+const props = defineProps({ roomId: String })
 const emit = defineEmits(['close'])
 
 const name = ref('')
@@ -122,7 +121,7 @@ function onHouseChange() { roomId.value = '' }
 
 const roomList = computed(() => {
   if (!houseId.value) return []
-  return rooms.value.filter(r => r.house_id == houseId.value && r.status === '空置')
+  return rooms.value.filter(r => r.house_id == houseId.value && (r.status === 'vacant' || r.status === '空置'))
 })
 
 function onRoomChange() {
@@ -134,7 +133,8 @@ function onRoomChange() {
 }
 
 async function save() {
-  if (!roomId.value) return alert('请选择房间')
+  const rid = roomId.value || props.roomId
+  if (!rid) return alert('请选择房间')
   if (!name.value.trim()) return alert('请输入姓名')
   if (!idCard.value || idCard.value.length !== 18) return alert('请输入18位身份证号')
   for (const co of coOccupants.value) {
@@ -144,18 +144,12 @@ async function save() {
 
   const now = new Date().toISOString()
   const ds = now.slice(0, 10)
-  const room = rooms.value.find(r => r.id == roomId.value)
+  const room = rooms.value.find(r => r.id == rid)
   const house = houses.value.find(h => h.id == room?.house_id)
 
   const { data: settings } = await supabase.from('settings').select('key,value')
-  const getSetting = (key, def) => {
-    const s = settings?.find(x => x.key === key)
-    return s ? parseFloat(s.value) : def
-  }
-  const getStr = (key, def) => {
-    const s = settings?.find(x => x.key === key)
-    return s && s.value ? s.value : def
-  }
+  const getSetting = (key, def) => { const s = settings?.find(x => x.key === key); return s ? parseFloat(s.value) : def }
+  const getStr = (key, def) => { const s = settings?.find(x => x.key === key); return s && s.value ? s.value : def }
 
   const waterPrice = getSetting('meterPrice_water', 5)
   const electricPrice = getSetting('meterPrice_electric', 1.5)
@@ -166,78 +160,58 @@ async function save() {
   const coList = coOccupants.value.filter(c => c.name.trim())
 
   const { data: newTenant, error } = await supabase.from('tenants').insert({
-    name: name.value.trim(),
-    phone: phone.value || null,
-    id_card: idCard.value,
-    occupant_count: totalOccupant.value,
-    room_id: Number(roomId.value),
-    start_date: startDate.value,
-    end_date: endDate.value,
-    rent_amount: rentAmount.value,
-    deposit: deposit.value,
-    payment_cycle: paymentCycle.value,
-    payment_day: paymentDay.value,
-    water_reading: waterReading.value || null,
-    electric_reading: electricReading.value || null,
+    name: name.value.trim(), phone: phone.value || null, id_card: idCard.value,
+    occupant_count: totalOccupant.value, room_id: Number(rid),
+    start_date: startDate.value, end_date: endDate.value,
+    rent_amount: rentAmount.value, deposit: deposit.value,
+    payment_cycle: paymentCycle.value, payment_day: paymentDay.value,
+    water_reading: waterReading.value || null, electric_reading: electricReading.value || null,
     status: 'renting'
   }).select().single()
 
   if (error) { alert('租客保存失败：' + error.message); return }
 
   const tenantId = newTenant.id
-
-  await supabase.from('rooms').update({ status: '在住' }).eq('id', roomId.value)
+  await supabase.from('rooms').update({ status: 'rented' }).eq('id', rid)
 
   if (waterReading.value && parseFloat(waterReading.value) > 0) {
-    await supabase.from('meters').insert({
-      id: String(Date.now()) + '_w', type: 'water', room_id: roomId.value,
-      tenant_id: tenantId, date: ds, action: 'init_reading',
-      lastreading: 0, currentreading: parseFloat(waterReading.value),
-      usage: parseFloat(waterReading.value),
-      amount: parseFloat(waterReading.value) * waterPrice, unitprice: waterPrice
-    })
+    await supabase.from('meters').insert({ type: 'water', room_id: rid, tenant_id: tenantId, date: ds, action: 'init_reading', last_reading: 0, current_reading: parseFloat(waterReading.value), usage: parseFloat(waterReading.value), amount: parseFloat(waterReading.value) * waterPrice, unit_price: waterPrice })
   }
   if (electricReading.value && parseFloat(electricReading.value) > 0) {
-    await supabase.from('meters').insert({
-      id: String(Date.now()) + '_e', type: 'electric', room_id: roomId.value,
-      tenant_id: tenantId, date: ds, action: 'init_reading',
-      lastreading: 0, currentreading: parseFloat(electricReading.value),
-      usage: parseFloat(electricReading.value),
-      amount: parseFloat(electricReading.value) * electricPrice, unitprice: electricPrice
-    })
+    await supabase.from('meters').insert({ type: 'electric', room_id: rid, tenant_id: tenantId, date: ds, action: 'init_reading', last_reading: 0, current_reading: parseFloat(electricReading.value), usage: parseFloat(electricReading.value), amount: parseFloat(electricReading.value) * electricPrice, unit_price: electricPrice })
   }
 
   const rentForCycle = paymentCycle.value === 'quarterly' ? rentAmount.value * 3 : rentAmount.value
-  await supabase.from('bills').insert([
-    { id: String(Date.now()) + '_rent', tenant_id: tenantId, room_id: roomId.value, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '', title: '房租', category: '房租', total_amount: rentForCycle, paid_amount: 0, status: 'pending', bill_month: startDate.value.slice(0, 7), rent_amount: rentForCycle, deposit: 0, date_range: '' },
-    { id: String(Date.now()) + '_dep', tenant_id: tenantId, room_id: roomId.value, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '', title: '押金', category: '押金', total_amount: deposit.value, paid_amount: 0, status: 'pending', bill_month: startDate.value.slice(0, 7), rent_amount: 0, deposit: deposit.value, date_range: '' }
+  const { error: billErr } = await supabase.from('bills').insert([
+    { tenant_id: tenantId, room_id: rid, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '', title: '房租', category: '房租', total_amount: rentForCycle, paid_amount: 0, status: 'pending', bill_month: startDate.value.slice(0, 7), rent_amount: rentForCycle, deposit: 0, date_range: '' },
+    { tenant_id: tenantId, room_id: rid, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '', title: '押金', category: '押金', total_amount: deposit.value, paid_amount: 0, status: 'pending', bill_month: startDate.value.slice(0, 7), rent_amount: 0, deposit: deposit.value, date_range: '' }
   ])
+  if (billErr) { alert('账单生成失败：' + billErr.message); return }
 
   if (genContract.value) {
     await supabase.from('contracts').insert({
-      tenant_id: tenantId,
-      room_id: roomId.value,
-      template_data: {
-        landlord: landlordName,
-        tenantName: name.value.trim(),
-        idCard: idCard.value,
-        phone: phone.value || '',
-        occupantCount: totalOccupant.value,
-        coOccupants: coList.map(c => ({ name: c.name, phone: c.phone || '', idCard: c.idCard })),
-        rentAmount: rentAmount.value,
-        deposit: deposit.value,
-        startDate: startDate.value,
-        endDate: endDate.value,
-        roomNo: room?.room_no || ''
-      },
+      tenant_id: tenantId, room_id: rid,
+      template_data: { landlord: landlordName, tenantName: name.value.trim(), idCard: idCard.value, phone: phone.value || '', occupantCount: totalOccupant.value, coOccupants: coList.map(c => ({ name: c.name, phone: c.phone || '', idCard: c.idCard })), rentAmount: rentAmount.value, deposit: deposit.value, startDate: startDate.value, endDate: endDate.value, roomNo: room?.room_no || '' },
       status: '待签'
     })
   }
 
   loadAll()
-  alert('入住成功！账单已生成待收' + (genContract.value ? '，合同已生成' : ''))
+  alert('入住成功！')
   emit('close')
 }
+
+onMounted(() => {
+  if (props.roomId) {
+    roomId.value = String(props.roomId)
+    const r = rooms.value.find(x => x.id == roomId.value)
+    if (r) {
+      houseId.value = r.house_id
+      rentAmount.value = Number(r.rent_amount) || 0
+      deposit.value = Number(r.deposit) || 0
+    }
+  }
+})
 </script>
 
 <style scoped>

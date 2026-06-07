@@ -42,6 +42,7 @@ const unitPrice = ref(5.0)
 const list = ref([])
 
 function load() {
+  const typeStr = meterType.value === 'water' ? 'water' : 'electric'
   const result = []
   for (const room of rooms.value) {
     if (room.status !== '在住') continue
@@ -50,8 +51,8 @@ function load() {
     const house = houses.value.find(h => String(h.id) === String(room.house_id))
     let last = 0
     for (let i = meters.value.length - 1; i >= 0; i--) {
-      if (String(meters.value[i].room_id) === String(room.id) && meters.value[i].type === meterType.value) {
-        last = meters.value[i].currentreading || 0; break
+      if (String(meters.value[i].room_id) === String(room.id) && meters.value[i].type === typeStr && meters.value[i].source === 'tenant') {
+        last = meters.value[i].current_reading || 0; break
       }
     }
     result.push({ roomId: room.id, tenantId: tenant.id, tenantName: tenant.name, houseId: room.house_id, houseName: house?.address || '', roomNo: room.room_no, lastReading: last, currentReading: '', usage: 0, amount: 0 })
@@ -82,14 +83,12 @@ async function doSave(r, status) {
   const usage = curr - r.lastReading
   const today = new Date().toISOString()
   await supabase.from('meters').insert({
-    id: Date.now().toString(),
     type: meterType.value, room_id: r.roomId,
-    lastreading: r.lastReading, currentreading: curr,
-    usage, amount: r.amount, unitprice: unitPrice.value,
-    date: today.slice(0,10)
+    last_reading: r.lastReading, current_reading: curr,
+    usage, amount: r.amount, unit_price: unitPrice.value,
+    date: today.slice(0,10), source: 'tenant'
   })
   await supabase.from('bills').insert({
-    id: Date.now().toString() + '_bill',
     tenant_id: r.tenantId, room_id: r.roomId,
     category: meterType.value === 'water' ? '水费' : '电费',
     bill_month: today.slice(0,7),
