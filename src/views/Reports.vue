@@ -6,18 +6,19 @@
       <select v-model="selectedYear" class="input" @change="loadData">
         <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}年</option>
       </select>
+      <button class="btn" @click="exportExcel">📥 导出</button>
     </div>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-num">¥{{ monthIncome }}</div><div class="stat-label">本月收入</div></div>
       <div class="stat-card"><div class="stat-num">¥{{ monthExpense }}</div><div class="stat-label">本月支出</div></div>
-      <div class="stat-card"><div class="stat-num" :class="monthBalance >= 0 ? 'green' : 'red'">¥{{ monthBalance }}</div><div class="stat-label">本月结余</div></div>
+      <div class="stat-card"><div class="stat-num" :class="monthBalance >= 0 ? 'green' : 'red'">¥{{ monthBalance }}</div><div class="stat-label">本月利润</div></div>
     </div>
 
     <div class="stat-grid">
       <div class="stat-card"><div class="stat-num">¥{{ yearIncome }}</div><div class="stat-label">本年收入</div></div>
       <div class="stat-card"><div class="stat-num">¥{{ yearExpense }}</div><div class="stat-label">本年支出</div></div>
-      <div class="stat-card"><div class="stat-num" :class="yearBalance >= 0 ? 'green' : 'red'">¥{{ yearBalance }}</div><div class="stat-label">本年结余</div></div>
+      <div class="stat-card"><div class="stat-num" :class="yearBalance >= 0 ? 'green' : 'red'">¥{{ yearBalance }}</div><div class="stat-label">本年利润</div></div>
     </div>
 
     <div class="stat-grid">
@@ -44,7 +45,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { bills, expends } from '../stores/data.js'
+import { bills } from '../stores/data.js'
 
 const selectedYear = ref(new Date().getFullYear())
 const yearOptions = computed(() => {
@@ -71,28 +72,22 @@ function loadData() {
   const months = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
 
   for (const b of bills.value) {
+    const unpaid = (b.total_amount || 0) - (b.paid_amount || 0)
+    if (b.direction === 'income' && unpaid > 0) pt += unpaid
+
     const paid = b.paid_amount || 0
-    const total = b.total_amount || 0
-    const unpaid = total - paid
-    if (unpaid > 0) pt += unpaid
     if (paid > 0 && b.paid_time) {
       const pDate = new Date(b.paid_time)
       if (!isNaN(pDate.getTime()) && pDate.getFullYear() === year) {
-        yi += paid
-        if (pDate.getMonth() + 1 === cm && year === cy) mi += paid
-        mIncome[pDate.getMonth()] += paid
-      }
-    }
-  }
-
-  for (const e of expends.value) {
-    const amt = e.amount || 0
-    if (amt > 0 && e.time) {
-      const eDate = new Date(e.time)
-      if (!isNaN(eDate.getTime()) && eDate.getFullYear() === year) {
-        ye += amt
-        if (eDate.getMonth() + 1 === cm && year === cy) me += amt
-        mExpense[eDate.getMonth()] += amt
+        if (b.direction === 'income') {
+          yi += paid
+          if (pDate.getMonth() + 1 === cm && year === cy) mi += paid
+          mIncome[pDate.getMonth()] += paid
+        } else if (b.direction === 'expense') {
+          ye += paid
+          if (pDate.getMonth() + 1 === cm && year === cy) me += paid
+          mExpense[pDate.getMonth()] += paid
+        }
       }
     }
   }
@@ -110,17 +105,40 @@ function loadData() {
   monthlyExpense.value = mExpense.slice(0, showMonths)
 }
 
+function exportExcel() {
+  const rows = [['月份', '收入', '支出', '利润']]
+  for (let i = 0; i < chartMonths.value.length; i++) {
+    rows.push([
+      chartMonths.value[i],
+      monthlyIncome.value[i].toFixed(2),
+      monthlyExpense.value[i].toFixed(2),
+      (monthlyIncome.value[i] - monthlyExpense.value[i]).toFixed(2)
+    ])
+  }
+  rows.push(['合计', yearIncome.value, yearExpense.value, yearBalance.value])
+
+  let csv = '\uFEFF'
+  rows.forEach(r => csv += r.join(',') + '\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `收支报表_${selectedYear.value}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 const maxVal = computed(() => {
   const all = [...monthlyIncome.value, ...monthlyExpense.value]
   return Math.max(...all, 1)
 })
 function getBarHeight(val) { return (val / maxVal.value) * 150 + 'px' }
 
-watch(() => [bills.value, expends.value], () => loadData(), { deep: true, immediate: true })
+watch(() => bills.value, () => loadData(), { deep: true, immediate: true })
 </script>
 
 <style scoped>
-.filter-row { margin-bottom: 16px; }
+.filter-row { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
 .green { color: #16a34a; }
 .red { color: #dc2626; }
 .warn-card { border-left: 4px solid #f59e0b; }

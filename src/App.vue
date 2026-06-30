@@ -1,5 +1,21 @@
 <template>
-  <Login v-if="!isLoggedIn" />
+  <!-- 租客自助模式：纯净页面，无侧边栏 -->
+  <div v-if="isTenantSelfMode" class="tenant-self-only">
+    <TenantSelf />
+  </div>
+
+  <!-- 恢复码登录 -->
+  <div class="login-page" v-else-if="!userIdVerified">
+    <div class="login-card">
+      <h1>🏢 租务小帮手</h1>
+      <p class="subtitle">输入恢复码登录</p>
+      <input v-model="restoreCode" class="input" placeholder="请输入恢复码" @keyup.enter="verifyRestoreCode" />
+      <p class="error" v-if="restoreError">{{ restoreError }}</p>
+      <button class="btn primary full" @click="verifyRestoreCode" :disabled="restoring">{{ restoring ? '验证中...' : '登录' }}</button>
+      <p class="link" style="margin-top:16px">首次使用？联系管理员获取恢复码</p>
+    </div>
+  </div>
+
   <div id="app" v-else>
     <header class="header">
       <div class="logo">🏢 租务小帮手</div>
@@ -25,7 +41,6 @@
         <Tenants v-if="current === 'tenants'" @openDetail="detailId = $event" @openCheckout="doCheckout" @openCheckin="openCheckin" />
         <Bills v-if="current === 'bills'" @openBillCreate="showBillCreate = true" />
         <Meters v-if="current === 'meters'" @openDialog="openDialog" @openCharge="showMeterCharge = true" @openDeduct="showMeterDeduct = true" @openRemain="showMeterRemain = true" @openDing="showDingBalance = true" @openProperty="showPropertySettings = true" />
-        <PayManage v-if="current === 'paymanage'" />
         <MeterRank v-if="current === 'meterrank'" />
         <Unified v-if="current === 'unified'" />
         <Expends v-if="current === 'expends'" />
@@ -33,7 +48,6 @@
         <Reports v-if="current === 'reports'" />
         <Contracts v-if="current === 'contracts'" @print="showPrintContract = $event" />
         <Memos v-if="current === 'memos'" />
-        <TenantSelf v-if="current === 'tenantself'" />
         <CheckoutPage v-if="current === 'checkout'" :tenantId="checkoutTenantId" @close="current = 'dashboard'" />
         <Settings v-if="current === 'settings'" />
       </section>
@@ -70,10 +84,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { houses, rooms, loadAll } from './stores/data.js'
 import { supabase } from './supabase.js'
-import Login from './views/Login.vue'
 import Dashboard from './views/Dashboard.vue'
 import Houses from './views/Houses.vue'
 import Tenants from './views/Tenants.vue'
@@ -81,7 +94,6 @@ import TenantDetail from './views/TenantDetail.vue'
 import Bills from './views/Bills.vue'
 import BillCreate from './views/BillCreate.vue'
 import Meters from './views/Meters.vue'
-import PayManage from './views/PayManage.vue'
 import MeterRank from './views/MeterRank.vue'
 import MeterCharge from './views/MeterCharge.vue'
 import MeterDeduct from './views/MeterDeduct.vue'
@@ -114,7 +126,15 @@ const showPropertySettings = ref(false)
 const showOwnerPay = ref(false)
 const showDingBalance = ref(false)
 const showPrintContract = ref(null)
-const isLoggedIn = ref(false)
+const userIdVerified = ref(false)
+const restoreCode = ref('')
+const restoreError = ref('')
+const restoring = ref(false)
+
+const isTenantSelfMode = computed(() => {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('page') === 'tenantself'
+})
 
 function openCheckin(roomId) {
   checkinRoomId.value = String(roomId)
@@ -132,7 +152,6 @@ const menus = [
   { key: 'tenants', label: '租客管理', icon: '🧑‍🤝‍🧑' },
   { key: 'bills', label: '账单管理', icon: '💰' },
   { key: 'meters', label: '水电物业', icon: '⚡' },
-  { key: 'paymanage', label: '缴费管理', icon: '🔧' },
   { key: 'meterrank', label: '抄表排行', icon: '📊' },
   { key: 'unified', label: '统一抄表', icon: '📋' },
   { key: 'expends', label: '支出明细', icon: '💸' },
@@ -140,7 +159,6 @@ const menus = [
   { key: 'reports', label: '报表', icon: '📈' },
   { key: 'contracts', label: '电子合同', icon: '📄' },
   { key: 'memos', label: '备忘提醒', icon: '📝' },
-  { key: 'tenantself', label: '租客自助', icon: '👤' },
   { key: 'settings', label: '设置', icon: '⚙️' },
 ]
 
@@ -178,15 +196,45 @@ function openDialog(type) {
   dialog.show = true
 }
 
-function handleLogout() {
-  supabase.auth.signOut()
-  isLoggedIn.value = false
+async function verifyRestoreCode() {
+  restoreError.value = ''
+  if (!restoreCode.value.trim()) { restoreError.value = '请输入恢复码'; return }
+  restoring.value = true
+
+  const userId = restoreCode.value.trim()
+
+  const { data: check } = await supabase
+    .from('houses')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1)
+
+  restoring.value = false
+
+  if (!check || check.length === 0) {
+    restoreError.value = '恢复码无效或无数据'
+    return
+  }
+
+  localStorage.setItem('userId', userId)
+  userIdVerified.value = true
+  loadAll()
 }
 
-onMounted(async () => {
-  const { data } = await supabase.auth.getSession()
-  isLoggedIn.value = !!data.session
-  if (isLoggedIn.value) loadAll()
+function handleLogout() {
+  localStorage.removeItem('userId')
+  userIdVerified.value = false
+  restoreCode.value = ''
+}
+
+onMounted(() => {
+  if (isTenantSelfMode.value) return  // 租客自助模式不做任何初始化
+
+  const saved = localStorage.getItem('userId')
+  if (saved) {
+    restoreCode.value = saved
+    verifyRestoreCode()
+  }
 
   const params = new URLSearchParams(window.location.search)
   if (params.get('page') === 'checkout') {
@@ -199,6 +247,7 @@ onMounted(async () => {
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#f5f7fb;color:#1e293b}
+.tenant-self-only { min-height: 100vh; background: #f5f7fb; }
 .header{height:56px;background:#fff;border-bottom:1px solid #e8ecf1;display:flex;align-items:center;justify-content:space-between;padding:0 20px}
 .logo{font-size:18px;font-weight:700;color:#1e6f5c}
 .header-right{display:flex;align-items:center;gap:12px}
@@ -241,4 +290,11 @@ body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;background:#f5f7fb;c
 .form-item label{display:block;font-size:13px;color:#64748b;margin-bottom:4px}
 .form-item .input{width:100%}
 .dialog-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f5f7fb; }
+.login-card { background: white; border-radius: 20px; padding: 40px; width: 380px; max-width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.06); text-align: center; }
+h1 { font-size: 24px; color: #1e6f5c; margin-bottom: 4px; }
+.subtitle { color: #94a3b8; margin-bottom: 24px; }
+.link { color: #1e6f5c; cursor: pointer; margin-top: 12px; font-size: 13px; }
+.error { color: #dc2626; margin-top: 8px; font-size: 13px; }
+.btn.full { width: 100%; margin-top: 8px; }
 </style>

@@ -94,7 +94,7 @@ const pendingBills = computed(() => {
   return bills.value
     .filter(b => b.status === 'pending')
     .map(b => {
-      const tenant = tenants.value.find(t => t.name === b.tenant_name) || tenants.value.find(t => String(t.id) === String(b.tenant_id))
+      const tenant = tenants.value.find(t => String(t.id) === String(b.tenant_id))
       const room = rooms.value.find(r => String(r.id) === String(b.room_id))
       const amount = (b.total_amount || 0) - (b.paid_amount || 0)
       const payDay = tenant?.payment_day || 1
@@ -103,7 +103,8 @@ const pendingBills = computed(() => {
         const parts = b.bill_month.split('-')
         if (parts.length >= 2) {
           const dueDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, payDay)
-          diffDays = Math.ceil((today - dueDate) / 86400000)
+          dueDate.setHours(0, 0, 0, 0)
+          diffDays = Math.floor((dueDate - today) / 86400000)
         }
       }
       return { ...b, tenantName: tenant?.name || b.tenant_name || '-', roomNo: room?.room_no || b.room_no || '-', amount, diffDays }
@@ -125,10 +126,10 @@ const pendingGroups = computed(() => {
     const d = b.diffDays
     let group
     if (d === null) group = groupState[4]
-    else if (d > 0) group = groupState[0]
+    else if (d < 0) group = groupState[0]
     else if (d === 0) group = groupState[1]
-    else if (d >= -3) group = groupState[2]
-    else if (d >= -7) group = groupState[3]
+    else if (d <= 3) group = groupState[2]
+    else if (d <= 7) group = groupState[3]
     else group = groupState[4]
     group.list.push(b)
   }
@@ -145,9 +146,9 @@ const pendingTotal = computed(() => pendingBills.value.reduce((s, b) => s + b.am
 function urgencyText(b) {
   const d = b.diffDays
   if (d === null) return '待收'
-  if (d > 0) return `逾期${d}天`
+  if (d < 0) return `逾期${-d}天`
   if (d === 0) return '今天到期'
-  return `${-d}天后`
+  return `${d}天后`
 }
 
 const activeCategory = ref('全部')
@@ -296,10 +297,6 @@ function exportCSV() {
   URL.revokeObjectURL(url)
 }
 
-function showDetail(b) {
-  alert(`收款详情\n租客：${b.tenantName}\n房间：${b.houseAddress} ${b.roomNo}\n类型：${b.category}\n金额：¥${b.amount}\n时间：${formatTime(b.paidTime)}`)
-}
-
 function formatTime(t) {
   if (!t) return '-'
   return new Date(t).toLocaleString('zh-CN')
@@ -307,15 +304,8 @@ function formatTime(t) {
 </script>
 
 <style scoped>
-.tab-bar { display: flex; margin-bottom: 16px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
-.tab-item { flex: 1; text-align: center; padding: 8px; border-radius: 8px; font-size: 14px; cursor: pointer; color: #64748b; }
-.tab-item.active { background: white; color: #1e6f5c; font-weight: 600; }
-.filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter-tab { padding: 4px 12px; border-radius: 14px; font-size: 12px; background: #f1f5f9; color: #475569; cursor: pointer; }
-.filter-tab.active { background: #1e6f5c; color: white; }
 .group-card { margin-bottom: 12px; }
 .group-head { display: flex; justify-content: space-between; align-items: center; padding: 14px; cursor: pointer; font-size: 14px; font-weight: 600; user-select: none; }
-.group-head:hover { background: #f8fafc; }
+.group-head:hover { background: var(--gray-50); }
 .total-row { padding: 14px; font-size: 16px; font-weight: 700; text-align: center; }
-.btn-sm.danger { color: #dc2626; border-color: #fecaca; }
 </style>

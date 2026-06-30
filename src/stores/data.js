@@ -23,6 +23,10 @@ export const memoUnread = ref(0)
 export const expiringList = ref([])
 export const urgentBills = ref([])
 
+function getUserId() {
+  return localStorage.getItem('userId') || 'fm780913'
+}
+
 export function calcStats() {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -32,12 +36,9 @@ export function calcStats() {
   const nowUrgentBills = []
 
   for (const b of bills.value) {
-    if (b.status !== 'paid') {
-      const unpaid = (b.total_amount || 0) - (b.paid_amount || 0)
-      if (unpaid > 0) { pendingCount++; pendingTotal += unpaid }
-    }
-    const unpaid2 = (b.total_amount || 0) - (b.paid_amount || 0)
-    if (unpaid2 <= 0) continue
+    const unpaid = (b.total_amount || 0) - (b.paid_amount || 0)
+    if (unpaid <= 0) continue
+
     let isUrgent = false
     if (b.due_date) {
       const dd = new Date(b.due_date); dd.setHours(0, 0, 0, 0)
@@ -53,7 +54,12 @@ export function calcStats() {
         if (Math.floor((dd2 - today) / 86400000) <= 0) isUrgent = true
       }
     }
-    if (isUrgent) nowUrgentBills.push(b)
+
+    if (isUrgent) {
+      pendingCount++
+      pendingTotal += unpaid
+      nowUrgentBills.push(b)
+    }
   }
 
   let rentingCount = 0, expiringCount = 0
@@ -74,9 +80,9 @@ export function calcStats() {
 
   let pendingPayTotal = 0
   for (const ow of owners.value) {
-    const dueDay = parseInt(ow.paymentday) || 1
-    const cycle = ow.rentcycle || 'monthly'
-    const startMonth = parseInt(ow.startmonth) || 1
+    const dueDay = parseInt(ow.payment_day) || 1
+    const cycle = ow.rent_cycle || 'monthly'
+    const startMonth = parseInt(ow.start_month) || 1
     let dueDate3 = new Date(today.getFullYear(), startMonth - 1, dueDay)
     dueDate3.setHours(0, 0, 0, 0)
     while (dueDate3.getTime() <= todayTs) {
@@ -85,7 +91,7 @@ export function calcStats() {
       else dueDate3.setMonth(dueDate3.getMonth() + 1)
     }
     if (Math.ceil((dueDate3.getTime() - todayTs) / 86400000) <= globalRemindDays.value) {
-      pendingPayTotal += ow.monthlyrent || 0
+      pendingPayTotal += ow.monthly_rent || 0
     }
   }
 
@@ -110,12 +116,13 @@ export function calcStats() {
   stats.expiringCount = expiringCount
   stats.vacantCount = rooms.value.filter(r => r.status === 'vacant').length
 
+  // 本月已收 = bills 中 direction=income 且本月 paid 的金额
   const cm = today.getMonth() + 1; const cy = today.getFullYear()
   let mi = 0
   for (const b of bills.value) {
-    if (b.status === 'paid' && b.paid_time) {
-      const d = new Date(b.paid_time)
-      if (d.getFullYear() === cy && d.getMonth() + 1 === cm) mi += b.paid_amount || 0
+    if (b.direction === 'income' && b.status === 'paid' && b.bill_month) {
+      const [y, m] = b.bill_month.split('-').map(Number)
+      if (y === cy && m === cm) mi += b.paid_amount || 0
     }
   }
   stats.monthIncome = mi.toFixed(2)
@@ -135,16 +142,17 @@ export function calcStats() {
 }
 
 export async function loadAll() {
+  const userId = getUserId()
   const results = await Promise.allSettled([
-    supabase.from('houses').select('*'),
-    supabase.from('rooms').select('*'),
-    supabase.from('tenants').select('*'),
-    supabase.from('bills').select('*'),
-    supabase.from('meters').select('*'),
-    supabase.from('owners').select('*'),
-    supabase.from('expends').select('*'),
-    supabase.from('property_settings').select('*'),
-    supabase.from('memos').select('*'),
+    supabase.from('houses').select('*').eq('user_id', userId),
+    supabase.from('rooms').select('*').eq('user_id', userId),
+    supabase.from('tenants').select('*').eq('user_id', userId),
+    supabase.from('bills').select('*').eq('user_id', userId),
+    supabase.from('meters').select('*').eq('user_id', userId),
+    supabase.from('owners').select('*').eq('user_id', userId),
+    supabase.from('expends').select('*').eq('user_id', userId),
+    supabase.from('property_settings').select('*').eq('user_id', userId),
+    supabase.from('memos').select('*').eq('user_id', userId),
   ])
 
   const [h, r, t, b, m, o, e, ps, memo] = results

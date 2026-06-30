@@ -6,7 +6,7 @@
         <span>提醒天数：</span>
         <input v-model.number="remindDays" type="number" min="1" max="30" class="input" style="width:70px" />
         <span>天</span>
-        <button class="btn primary" @click="$emit('openDialog', 'owner')">+ 添加业主</button>
+        <button class="btn primary" @click="openAdd">+ 添加业主</button>
       </div>
     </div>
 
@@ -60,24 +60,60 @@
     </div>
 
     <div v-if="grouped.length === 0 && ungrouped.length === 0" class="empty">暂无业主</div>
+
+    <!-- 编辑/添加弹窗 -->
+    <div class="mask" v-if="showDialog" @click.self="showDialog = false">
+      <div class="dialog" style="width:420px;max-height:90vh;overflow-y:auto">
+        <h3>{{ editingId ? '编辑业主' : '添加业主' }}</h3>
+        <div class="form-item"><label>姓名</label><input v-model="form.name" class="input" /></div>
+        <div class="form-item"><label>月租</label><input v-model.number="form.monthlyRent" type="number" class="input" /></div>
+        <div class="form-item">
+          <label>周期</label>
+          <select v-model="form.cycle" class="input">
+            <option value="monthly">月付</option>
+            <option value="quarterly">季付</option>
+            <option value="yearly">年付</option>
+          </select>
+        </div>
+        <div class="form-item"><label>付款日</label><input v-model.number="form.paymentDay" type="number" min="1" max="31" class="input" /></div>
+        <div class="form-item"><label>开始月份</label><input v-model.number="form.startMonth" type="number" min="1" max="12" class="input" /></div>
+        <div class="form-item">
+          <label>关联楼栋</label>
+          <select v-model="form.houseId" class="input">
+            <option value="">无</option>
+            <option v-for="h in houses" :key="h.id" :value="h.id">{{ h.address || h.name }}</option>
+          </select>
+        </div>
+        <div class="form-item"><label>备注</label><input v-model="form.note" class="input" /></div>
+        <div class="dialog-btns">
+          <button class="btn" @click="showDialog = false">取消</button>
+          <button class="btn primary" @click="saveOwner">保存</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { houses, rooms, owners, loadAll } from '../stores/data.js'
+import { houses, owners, loadAll } from '../stores/data.js'
 import { supabase } from '../supabase.js'
 
 const remindDays = ref(3)
 const ungroupedExpanded = ref(false)
+const showDialog = ref(false)
+const editingId = ref(null)
+
+const form = ref({
+  name: '', monthlyRent: 0, cycle: 'monthly',
+  paymentDay: 1, startMonth: 1, houseId: '', note: ''
+})
 
 const cycleMap = { 'monthly': '月付', 'quarterly': '季付', 'yearly': '年付' }
 
 const enriched = computed(() => {
   const houseMap = {}
   houses.value.forEach(h => { houseMap[String(h.id)] = h })
-  const roomMap = {}
-  rooms.value.forEach(r => { roomMap[String(r.id)] = r })
 
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const currentDay = today.getDate()
@@ -85,25 +121,12 @@ const enriched = computed(() => {
   const currentYear = today.getFullYear()
 
   return owners.value.map(ow => {
-    const parts = [], oHouseIds = []
-    if (ow.houses && ow.houses.length) {
-      ow.houses.forEach(hid => {
-        parts.push('🏢' + (houseMap[String(hid)]?.address || '未知'))
-        oHouseIds.push(String(hid))
-      })
-    }
-    if (ow.rooms && ow.rooms.length) {
-      ow.rooms.forEach(rid => {
-        const r = roomMap[String(rid)]
-        parts.push('🚪' + (r?.room_no || '未知'))
-        if (r?.house_id && !oHouseIds.includes(String(r.house_id))) oHouseIds.push(String(r.house_id))
-      })
-    }
-
-    const cycle = ow.rentcycle || 'monthly'
-    const cycleText = cycleMap[cycle] || '月付'
-    const paymentDay = ow.paymentday || 1
-    const startMonth = ow.startmonth || 1
+    const cycle = ow.rentcycle || ow.rent_cycle || 'monthly'
+    const paymentDay = ow.paymentday || ow.payment_day || 1
+    const startMonth = ow.startmonth || ow.start_month || 1
+    const monthlyRent = ow.monthlyrent || ow.monthly_rent || 0
+    const houseId = ow.house_id || ''
+    const houseName = houseMap[String(houseId)]?.address || ''
 
     let nextPayDate = null, countdown = null, countdownText = ''
     if (paymentDay >= 1 && paymentDay <= 31) {
@@ -129,9 +152,17 @@ const enriched = computed(() => {
 
     return {
       ...ow,
-      monthlyRent: ow.monthlyrent || 0,
-      paymentDay, cycleText, linkText: parts.length ? parts.join(' ') : '暂无关联',
-      houseIds: oHouseIds, countdown, countdownText, _open: false
+      monthlyRent,
+      paymentDay,
+      cycle,
+      cycleText: cycleMap[cycle] || '月付',
+      startMonth,
+      houseId,
+      linkText: houseName || '未关联',
+      houseIds: houseId ? [String(houseId)] : [],
+      countdown,
+      countdownText,
+      _open: false
     }
   })
 })
@@ -173,10 +204,57 @@ function onStart(e, o) { startX = e.touches[0].clientX }
 function onMove(e, o) { const diff = startX - e.touches[0].clientX; if (diff > 50) o._open = true; else if (diff < -20) o._open = false }
 function onEnd(o) {}
 
-function editOwner(o) { alert(`编辑业主：${o.name}\n月租：¥${o.monthlyRent}\n周期：${o.cycleText}\n付款日：${o.paymentDay}号`) }
-async function delOwner(o) { if (!confirm(`确认删除业主 ${o.name}？`)) return; await supabase.from('owners').delete().eq('id', o.id); loadAll() }
+function openAdd() {
+  editingId.value = null
+  form.value = { name: '', monthlyRent: 0, cycle: 'monthly', paymentDay: 1, startMonth: 1, houseId: '', note: '' }
+  showDialog.value = true
+}
 
-onMounted(() => { const saved = localStorage.getItem('globalRemindDays'); if (saved) remindDays.value = parseInt(saved) || 3 })
+function editOwner(o) {
+  editingId.value = o.id
+  form.value = {
+    name: o.name || '',
+    monthlyRent: o.monthlyRent || 0,
+    cycle: o.rentcycle || o.rent_cycle || 'monthly',
+    paymentDay: o.paymentday || o.payment_day || 1,
+    startMonth: o.startmonth || o.start_month || 1,
+    houseId: o.house_id || '',
+    note: o.note || ''
+  }
+  showDialog.value = true
+}
+
+async function saveOwner() {
+  if (!form.value.name.trim()) return alert('请输入业主姓名')
+  const data = {
+    name: form.value.name.trim(),
+    monthlyrent: form.value.monthlyRent,
+    rentcycle: form.value.cycle,
+    paymentday: form.value.paymentDay,
+    startmonth: form.value.startMonth,
+    house_id: form.value.houseId || null,
+    note: form.value.note
+  }
+  if (editingId.value) {
+    await supabase.from('owners').update(data).eq('id', editingId.value)
+  } else {
+    await supabase.from('owners').insert(data)
+  }
+  showDialog.value = false
+  loadAll()
+}
+
+async function delOwner(o) {
+  if (!confirm(`确认删除业主 ${o.name}？`)) return
+  await supabase.from('owners').delete().eq('id', o.id)
+  loadAll()
+}
+
+onMounted(() => {
+  const saved = localStorage.getItem('globalRemindDays')
+  if (saved) remindDays.value = parseInt(saved) || 3
+  loadAll()
+})
 </script>
 
 <style scoped>

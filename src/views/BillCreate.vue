@@ -85,7 +85,7 @@
 
 <script setup>
 import { ref, reactive, computed } from 'vue'
-import { tenants, rooms, houses, loadAll } from '../stores/data.js'
+import { tenants, bills, rooms, houses, loadAll } from '../stores/data.js'
 import { supabase } from '../supabase.js'
 
 const emit = defineEmits(['close'])
@@ -123,6 +123,8 @@ function onTenantChange() {
   form.paymentCycle = t.payment_cycle || 'monthly'
   form.deposit = t.deposit || 0
   startDay.value = t.payment_day || new Date().getDate()
+  const hasDeposit = bills.value.some(b => String(b.tenant_id) === String(t.id) && b.category === '押金')
+  isFirst.value = !hasDeposit
   calcDateRange()
   calcTotal()
 }
@@ -142,7 +144,7 @@ function calcDateRange() {
 }
 
 const totalAmount = computed(() => {
-  let t = (form.rentAmount || 0) + (form.deposit || 0) + (form.utilityFee || 0) + (form.parkingFee || 0) + (form.waterDeposit || 0) + (form.cardDeposit || 0)
+  let t = (form.rentAmount || 0) + (isFirst.value ? form.deposit : 0) + (form.utilityFee || 0) + (form.parkingFee || 0) + (form.waterDeposit || 0) + (form.cardDeposit || 0)
   form.extraFees.forEach(e => t += e.amount || 0)
   return t.toFixed(2)
 })
@@ -157,38 +159,75 @@ function addExtra() {
   calcTotal()
 }
 
+function getDirection(category) {
+  if (category === '押金' || category === '水费押金' || category === '房卡押金') return 'deposit'
+  return 'income'
+}
+
 async function saveBill(status) {
   if (!form.tenantId) return alert('请选择租客')
   const t = tenants.value.find(x => String(x.id) === String(form.tenantId))
-  let baseId = Date.now()
   const today = new Date().toISOString()
-  const bills = []
+  const markPaid = status === 'paid'
+  const paid = markPaid ? (form.paidAmount || 0) : 0
 
-  if (form.deposit > 0) {
-    bills.push({ id: String(baseId++) + '_dep', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: '押金', total_amount: form.deposit, paid_amount: status === 'paid' ? form.deposit : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
+  const fixedFees = []
+  if (isFirst.value && form.deposit > 0) fixedFees.push({ category: '押金', amount: form.deposit })
+  if (form.parkingFee > 0) fixedFees.push({ category: '车位费', amount: form.parkingFee })
+  if (form.waterDeposit > 0) fixedFees.push({ category: '水费押金', amount: form.waterDeposit })
+  if (form.cardDeposit > 0) fixedFees.push({ category: '房卡押金', amount: form.cardDeposit })
+
+  let remainingPaid = paid
+  for (const fee of fixedFees) {
+    const alloc = Math.min(remainingPaid, fee.amount)
+    await supabase.from('bills').insert({
+      tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no,
+      category: fee.category, total_amount: fee.amount, paid_amount: alloc,
+      status: alloc >= fee.amount ? 'paid' : 'pending',
+      bill_month: form.billMonth, paid_time: alloc > 0 ? today : null,
+      direction: getDirection(fee.category),
+      date_range: form.dateRange
+    })
+    remainingPaid -= alloc
   }
+
+  const rentPaid = Math.min(remainingPaid, form.rentAmount)
+  await supabase.from('bills').insert({
+    tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no,
+    category: '房租', total_amount: form.rentAmount, paid_amount: rentPaid,
+    status: rentPaid >= form.rentAmount ? 'paid' : 'pending',
+    bill_month: form.billMonth, paid_time: rentPaid > 0 ? today : null,
+    direction: 'income',
+    date_range: form.dateRange
+  })
+  remainingPaid -= rentPaid
+
   if (form.utilityFee > 0) {
-    bills.push({ id: String(baseId++) + '_util', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: '水电费', total_amount: form.utilityFee, paid_amount: status === 'paid' ? form.utilityFee : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
-  }
-  if (form.parkingFee > 0) {
-    bills.push({ id: String(baseId++) + '_park', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: '车位费', total_amount: form.parkingFee, paid_amount: status === 'paid' ? form.parkingFee : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
-  }
-  if (form.waterDeposit > 0) {
-    bills.push({ id: String(baseId++) + '_wdep', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: '水费押金', total_amount: form.waterDeposit, paid_amount: status === 'paid' ? form.waterDeposit : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
-  }
-  if (form.cardDeposit > 0) {
-    bills.push({ id: String(baseId++) + '_cdep', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: '房卡押金', total_amount: form.cardDeposit, paid_amount: status === 'paid' ? form.cardDeposit : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
-  }
-  if (form.rentAmount > 0) {
-    bills.push({ id: String(baseId++) + '_rent', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: '房租', total_amount: form.rentAmount, paid_amount: status === 'paid' ? form.rentAmount : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
-  }
-  for (const ef of form.extraFees) {
-    bills.push({ id: String(baseId++) + '_extra', tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no, category: ef.name, total_amount: ef.amount, paid_amount: status === 'paid' ? ef.amount : 0, status, bill_month: form.billMonth, paid_time: status === 'paid' ? today : null })
+    const uPaid = Math.min(remainingPaid, form.utilityFee)
+    await supabase.from('bills').insert({
+      tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no,
+      category: '水电费', total_amount: form.utilityFee, paid_amount: uPaid,
+      status: uPaid >= form.utilityFee ? 'paid' : 'pending',
+      bill_month: form.billMonth, paid_time: uPaid > 0 ? today : null,
+      direction: 'income',
+      date_range: form.dateRange
+    })
+    remainingPaid -= uPaid
   }
 
-  for (const b of bills) {
-    await supabase.from('bills').insert(b)
+  for (const ef of form.extraFees) {
+    const ePaid = Math.min(remainingPaid, ef.amount)
+    await supabase.from('bills').insert({
+      tenant_id: form.tenantId, room_id: t.room_id, tenant_name: t.name, room_no: t.room_no,
+      category: ef.name, total_amount: ef.amount, paid_amount: ePaid,
+      status: ePaid >= ef.amount ? 'paid' : 'pending',
+      bill_month: form.billMonth, paid_time: ePaid > 0 ? today : null,
+      direction: 'income',
+      date_range: form.dateRange
+    })
+    remainingPaid -= ePaid
   }
+
   loadAll()
   emit('close')
 }

@@ -45,13 +45,13 @@ function load() {
   const typeStr = meterType.value === 'water' ? 'water' : 'electric'
   const result = []
   for (const room of rooms.value) {
-    if (room.status !== '在住') continue
+    if (room.status !== 'rented') continue
     const tenant = tenants.value.find(t => String(t.room_id) === String(room.id) && t.status === 'renting')
     if (!tenant) continue
     const house = houses.value.find(h => String(h.id) === String(room.house_id))
     let last = 0
     for (let i = meters.value.length - 1; i >= 0; i--) {
-      if (String(meters.value[i].room_id) === String(room.id) && meters.value[i].type === typeStr && meters.value[i].source === 'tenant') {
+      if (String(meters.value[i].room_id) === String(room.id) && meters.value[i].type === typeStr) {
         last = meters.value[i].current_reading || 0; break
       }
     }
@@ -93,7 +93,8 @@ async function doSave(r, status) {
     category: meterType.value === 'water' ? '水费' : '电费',
     bill_month: today.slice(0,7),
     total_amount: r.amount, paid_amount: status === 'paid' ? r.amount : 0,
-    status
+    status,
+    direction: 'income'
   })
 }
 

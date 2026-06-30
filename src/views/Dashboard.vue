@@ -58,13 +58,50 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { stats, expiringList, urgentBills, tenants, bills, loadAll } from '../stores/data.js'
+import { stats, tenants, bills, loadAll } from '../stores/data.js'
+import { supabase } from '../supabase.js'
+
+function renewTenant(t) {
+  const months = prompt('续租几个月？', '12')
+  if (!months) return
+  const m = parseInt(months)
+  if (isNaN(m) || m <= 0) return
+
+  const oldEnd = new Date(t.end_date)
+  const newEnd = new Date(oldEnd)
+  newEnd.setMonth(newEnd.getMonth() + m)
+  const newEndStr = newEnd.getFullYear() + '-' + String(newEnd.getMonth() + 1).padStart(2, '0') + '-' + String(newEnd.getDate()).padStart(2, '0')
+
+  if (!confirm(`确认续租 ${m} 个月？\n${t.name} ${t.room_no || ''}\n新到期日：${newEndStr}\n\n将自动生成本期房租账单`)) return
+
+  supabase.from('tenants').update({ end_date: newEndStr }).eq('id', t.id).then(() => {
+    const rentAmount = t.rent_amount || 0
+    const paymentCycle = t.payment_cycle || 'monthly'
+    const rentForCycle = paymentCycle === 'quarterly' ? rentAmount * 3 : rentAmount
+    const billMonth = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0')
+
+    supabase.from('bills').insert({
+      tenant_id: t.id,
+      room_id: t.room_id,
+      category: '房租',
+      bill_month: billMonth,
+      total_amount: rentForCycle,
+      paid_amount: 0,
+      status: 'pending',
+      direction: 'income',
+      tenant_name: t.name,
+      room_no: t.room_no || ''
+    }).then(() => {
+      loadAll()
+      alert('续租成功')
+    })
+  })
+}
 
 const todoList = computed(() => {
   const list = []
   const today = new Date(); today.setHours(0,0,0,0)
 
-  // 逾期账单和今天到期
   for (const b of bills.value) {
     if (b.status !== 'pending' && b.status !== '待收') continue
     const unpaid = (b.total_amount || 0) - (b.paid_amount || 0)
@@ -86,14 +123,18 @@ const todoList = computed(() => {
     }
   }
 
-  // 到期合同
   for (const t of tenants.value) {
     if (t.status !== 'renting' && t.status !== '在住') continue
     if (!t.end_date) continue
     const ed = new Date(t.end_date); ed.setHours(0,0,0,0)
     const diff = Math.ceil((ed - today) / 86400000)
     if (diff <= 30 && diff > 0) {
-      list.push({ level: 'yellow', text: `${t.name} ${t.room_no || ''} 合同${t.end_date}到期 剩${diff}天`, btn: '查看', action: () => {} })
+      list.push({
+        level: 'yellow',
+        text: `${t.name} ${t.room_no || ''} 合同${t.end_date}到期 剩${diff}天`,
+        btn: '续租',
+        action: () => renewTenant(t)
+      })
     }
   }
 
@@ -117,11 +158,11 @@ onMounted(() => { loadAll() })
 .stat-label { font-size: 14px; opacity: 0.9; }
 .stat-sub { font-size: 12px; opacity: 0.7; margin-top: 4px; }
 
-.todo-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; }
+.todo-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
 .todo-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.todo-dot.red { background: #ef4444; }
-.todo-dot.yellow { background: #f59e0b; }
-.todo-dot.green { background: #22c55e; }
+.todo-dot.red { background: var(--danger); }
+.todo-dot.yellow { background: var(--warning); }
+.todo-dot.green { background: var(--success); }
 .todo-text { flex: 1; font-size: 14px; }
-.todo-action { color: #1e6f5c; font-size: 13px; cursor: pointer; font-weight: 500; }
+.todo-action { color: var(--primary); font-size: 13px; cursor: pointer; font-weight: 500; }
 </style>

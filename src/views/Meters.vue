@@ -2,266 +2,301 @@
   <div>
     <div class="page-head">
       <h2>⚡ 水电物业</h2>
-      <div class="head-btns">
-        <button class="btn" @click="$emit('openCharge')">💰 充值</button>
-        <button class="btn" @click="$emit('openDeduct')">📝 抄表扣费</button>
-        <button class="btn" @click="$emit('openRemain')">🔻 剩余扣减</button>
-        <button class="btn" @click="$emit('openDing')">🔌 云丁余额</button>
-        <button class="btn primary" @click="$emit('openDialog', 'meter')">+ 添加表具</button>
+    </div>
+
+    <div class="main-tabs">
+      <span :class="['main-tab', { active: mainTab === 'meter' }]" @click="mainTab = 'meter'">💧⚡ 水电费</span>
+      <span :class="['main-tab', { active: mainTab === 'property' }]" @click="mainTab = 'property'">🏢 物业费</span>
+    </div>
+
+    <!-- 水电费 -->
+    <div v-if="mainTab === 'meter'">
+      <div class="tab-bar">
+        <span :class="['tab-item', { active: meterType === 'water' }]" @click="switchType('water')">💧 水表</span>
+        <span :class="['tab-item', { active: meterType === 'electric' }]" @click="switchType('electric')">⚡ 电表</span>
+      </div>
+
+      <div class="form-item">
+        <label>房间</label>
+        <select v-model="roomId" class="input" @change="onRoomChange">
+          <option value="">选择房间</option>
+          <option v-for="r in rentedRooms" :key="r.id" :value="r.id">{{ r.houseName }} {{ r.roomNo }}（{{ r.tenantName }}）</option>
+        </select>
+      </div>
+
+      <div class="form-item">
+        <label>日期</label>
+        <input v-model="meterDate" type="date" class="input" />
+      </div>
+
+      <div class="form-item">
+        <label>单价（元/{{ meterType === 'water' ? '吨' : '度' }}）</label>
+        <input v-model.number="unitPrice" type="number" step="0.1" class="input" @change="savePrice" />
+      </div>
+
+      <div class="form-item">
+        <label>上期读数</label>
+        <input :value="lastReading" class="input" disabled />
+      </div>
+
+      <div class="form-item">
+        <label>本期读数</label>
+        <input v-model.number="currentReading" type="number" class="input" @input="calcReading" />
+      </div>
+
+      <div class="form-item">
+        <label>用量</label>
+        <input :value="meterUsage" class="input" disabled />
+      </div>
+
+      <div class="form-item">
+        <label>金额</label>
+        <input :value="meterAmount.toFixed(2)" class="input" disabled />
+      </div>
+
+      <button class="btn primary" style="width:100%" @click="saveMeter" :disabled="saving">
+        {{ saving ? '保存中...' : '保存抄表并生成账单' }}
+      </button>
+
+      <!-- 抄表记录 -->
+      <div class="card" v-if="records.length" style="margin-top:16px">
+        <h3>抄表记录</h3>
+        <table class="tbl">
+          <thead><tr><th>日期</th><th>房间</th><th>租客</th><th>上期</th><th>本期</th><th>用量</th><th>金额</th></tr></thead>
+          <tbody>
+            <tr v-for="r in records" :key="r.id">
+              <td>{{ r.date?.slice(0, 10) }}</td>
+              <td>{{ r.roomNo }}</td>
+              <td>{{ r.tenantName }}</td>
+              <td>{{ r.lastReading }}</td>
+              <td>{{ r.currentReading }}</td>
+              <td>{{ r.usage }}</td>
+              <td>¥{{ Number(r.amount).toFixed(2) }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <!-- 表具管理卡片 -->
-    <div class="card" v-if="meterList.length">
-      <h3>📊 表具管理</h3>
-      <table class="tbl">
-        <thead><tr><th>名称</th><th>类型</th><th>当前读数</th><th>操作</th></tr></thead>
-        <tbody>
-          <tr v-for="m in meterList" :key="m.id">
-            <td>{{ m.metername || '-' }}</td>
-            <td>{{ m.type === 'water' ? '💧 水表' : '⚡ 电表' }}</td>
-            <td>{{ m.currentreading || 0 }}</td>
-            <td>
-              <button class="btn-sm" @click="editMeter(m)">编辑</button>
-              <button class="btn-sm danger" @click="delMeter(m.id)">删除</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- 编辑表具弹窗 -->
-    <div class="mask" v-if="editingMeter" @click.self="editingMeter = null">
-      <div class="dialog">
-        <h3>编辑表具</h3>
-        <div class="form-item"><label>名称</label><input v-model="editMeterForm.metername" class="input" /></div>
-        <div class="form-item"><label>当前读数</label><input v-model.number="editMeterForm.currentreading" type="number" class="input" /></div>
-        <div class="dialog-btns">
-          <button class="btn" @click="editingMeter = null">取消</button>
-          <button class="btn primary" @click="saveMeter">保存</button>
-        </div>
+    <!-- 物业费 -->
+    <div v-if="mainTab === 'property'">
+      <div class="card">
+        <h3>添加物业费设置</h3>
+        <div class="form-item"><label>交费对象</label><select v-model="propTarget" class="input"><option value="">选择楼栋</option><option v-for="h in houses" :key="h.id" :value="h.id">{{ h.address }}</option></select></div>
+        <div class="form-item"><label>金额</label><input v-model.number="propAmount" type="number" class="input" /></div>
+        <div class="form-item"><label>周期</label><select v-model="propCycle" class="input"><option value="monthly">月付</option><option value="quarterly">季付</option><option value="yearly">年付</option></select></div>
+        <div class="form-item"><label>交费日</label><input v-model.number="propDay" type="number" min="1" max="31" class="input" /></div>
+        <button class="btn primary" style="width:100%" @click="saveProperty">保存设置</button>
       </div>
-    </div>
 
-    <div class="stat-grid">
-      <div class="stat-card water"><div class="stat-num">¥{{ monthWater }}</div><div class="stat-label">本月水费</div><div class="stat-sub">{{ monthWaterUsage }} 吨</div></div>
-      <div class="stat-card electric"><div class="stat-num">¥{{ monthElectric }}</div><div class="stat-label">本月电费</div><div class="stat-sub">{{ monthElectricUsage }} 度</div></div>
-      <div class="stat-card water"><div class="stat-num">¥{{ yearWater }}</div><div class="stat-label">本年水费</div><div class="stat-sub">{{ yearWaterUsage }} 吨</div></div>
-      <div class="stat-card electric"><div class="stat-num">¥{{ yearElectric }}</div><div class="stat-label">本年电费</div><div class="stat-sub">{{ yearElectricUsage }} 度</div></div>
-    </div>
-
-    <div class="filter-row">
-      <select v-model="houseId" class="input" @change="filterRecords"><option value="">全部楼栋</option><option v-for="h in houses" :key="h.id" :value="h.id">{{ h.address }}</option></select>
-      <input v-model="filterMonth" type="month" class="input" @change="filterRecords" />
-      <input v-model="searchText" placeholder="搜索房间..." class="input" @input="filterRecords" />
-      <select v-model="filterType" class="input" @change="filterRecords"><option value="all">全部类型</option><option value="water">水费</option><option value="electric">电费</option></select>
-    </div>
-
-    <div v-if="filteredRecords.length === 0" class="empty">暂无记录</div>
-    <div v-for="(r, idx) in filteredRecords" :key="r.id" class="meter-card" @click="toggle(idx)">
-      <div class="meter-head">
-        <span :class="['dot', r.type === 'water' ? 'blue' : 'yellow']"></span>
-        <span class="meter-room">{{ r.roomName }}</span>
-        <span class="meter-amount">¥{{ r.amount }}</span>
-        <span class="meter-arrow">{{ r._expanded ? '▼' : '▶' }}</span>
-      </div>
-      <div class="meter-body" v-if="r._expanded">
-        <div class="meter-row"><span>日期</span><span>{{ r.date }}</span></div>
-        <div class="meter-row"><span>类型</span><span>{{ r.type === 'water' ? '水费' : '电费' }}</span></div>
-        <div class="meter-row"><span>用量</span><span>{{ r.usage }} {{ r.type === 'water' ? '吨' : '度' }}</span></div>
-        <div class="meter-row"><span>上次读数</span><span>{{ r.lastReading }}</span></div>
-        <div class="meter-row"><span>本次读数</span><span>{{ r.currentReading }}</span></div>
-        <div class="meter-row"><span>金额</span><span>¥{{ r.amount }}</span></div>
-        <button class="btn-sm danger" @click.stop="revert(r)">撤销</button>
+      <div class="card" v-if="propList.length" style="margin-top:16px">
+        <h3>物业费列表</h3>
+        <table class="tbl">
+          <thead><tr><th>对象</th><th>金额</th><th>周期</th><th>交费日</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="p in propList" :key="p.id">
+              <td>{{ p.target_name }}</td><td>¥{{ p.amount }}</td>
+              <td>{{ p.cycle === 'monthly' ? '月付' : p.cycle === 'quarterly' ? '季付' : '年付' }}</td>
+              <td>{{ p.pay_day }}号</td>
+              <td><button class="btn-sm danger" @click="delProperty(p.id)">删除</button></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { meters, bills, rooms, houses, tenants, loadAll } from '../stores/data.js'
+import { ref, computed, onMounted } from 'vue'
+import { meters, tenants, rooms, houses, propertySettings, loadAll } from '../stores/data.js'
 import { supabase } from '../supabase.js'
 
-const houseId = ref('')
-const filterMonth = ref('')
-const searchText = ref('')
-const filterType = ref('all')
-const editingMeter = ref(null)
-const editMeterForm = ref({})
+const mainTab = ref('meter')
+const meterType = ref('water')
+const roomId = ref('')
+const tenantId = ref('')
+const meterDate = ref(new Date().toISOString().slice(0, 10))
+const unitPrice = ref(5)
+const lastReading = ref('0')
+const currentReading = ref('')
+const meterUsage = ref('0')
+const meterAmount = ref(0)
+const saving = ref(false)
 
-// 表具列表
-const meterList = computed(() => {
-  return meters.value.filter(m => m.type === 'water' || m.type === 'electric')
+const rentedRooms = computed(() => {
+  return rooms.value
+    .filter(r => r.status === 'rented')
+    .map(r => {
+      const t = tenants.value.find(t => String(t.room_id) === String(r.id) && t.status === 'renting')
+      const h = houses.value.find(h => String(h.id) === String(r.house_id))
+      return {
+        id: r.id,
+        roomNo: r.room_no || '',
+        houseName: h?.address || '',
+        tenantName: t?.name || '',
+        tenantId: t?.id || ''
+      }
+    })
 })
 
-function editMeter(m) {
-  editingMeter.value = m.id
-  editMeterForm.value = { ...m }
+const records = computed(() => {
+  if (!roomId.value) return []
+  const room = rooms.value.find(r => String(r.id) === String(roomId.value))
+  const tenant = tenants.value.find(t => String(t.id) === String(tenantId.value))
+  return meters.value
+    .filter(m => String(m.room_id) === String(roomId.value) && m.type === meterType.value)
+    .sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at))
+    .map(m => ({
+      id: m.id,
+      date: m.date || m.created_at,
+      roomNo: room?.room_no || '',
+      tenantName: tenant?.name || '',
+      lastReading: m.last_reading || 0,
+      currentReading: m.current_reading || 0,
+      usage: m.usage || 0,
+      amount: m.amount || 0
+    }))
+})
+
+function switchType(t) {
+  meterType.value = t
+  unitPrice.value = parseFloat(localStorage.getItem('meterPrice_' + t) || (t === 'water' ? 5 : 1.5))
+  roomId.value = ''
+  lastReading.value = '0'
+  currentReading.value = ''
+  meterUsage.value = '0'
+  meterAmount.value = 0
+}
+
+function savePrice() {
+  localStorage.setItem('meterPrice_' + meterType.value, String(unitPrice.value))
+}
+
+function onRoomChange() {
+  const r = rentedRooms.value.find(x => x.id === roomId.value)
+  tenantId.value = r?.tenantId || ''
+
+  const list = meters.value.filter(m => String(m.room_id) === String(roomId.value) && m.type === meterType.value)
+  if (list.length) {
+    const last = list[list.length - 1]
+    lastReading.value = String(last.current_reading || 0)
+  } else {
+    lastReading.value = '0'
+  }
+  currentReading.value = ''
+  meterUsage.value = '0'
+  meterAmount.value = 0
+}
+
+function calcReading() {
+  const last = parseFloat(lastReading.value) || 0
+  const curr = parseFloat(currentReading.value) || 0
+  const usage = Math.max(0, curr - last)
+  meterUsage.value = usage.toFixed(2)
+  meterAmount.value = usage * unitPrice.value
 }
 
 async function saveMeter() {
-  await supabase.from('meters').update({
-    metername: editMeterForm.value.metername,
-    currentreading: editMeterForm.value.currentreading
-  }).eq('id', editingMeter.value)
-  editingMeter.value = null
-  loadAll()
-}
+  if (!roomId.value) return alert('请选择房间')
+  const curr = parseFloat(currentReading.value) || 0
+  const last = parseFloat(lastReading.value) || 0
+  if (!currentReading.value) return alert('请输入读数')
+  if (curr < last) return alert('本期读数不能小于上期读数')
 
-async function delMeter(id) {
-  if (!confirm('确认删除这个表具？')) return
-  await supabase.from('meters').delete().eq('id', id)
-  loadAll()
-}
+  saving.value = true
+  const dateStr = meterDate.value
+  const usage = curr - last
+  const amount = usage * unitPrice.value
+  const r = rentedRooms.value.find(x => x.id === roomId.value)
 
-const stats = computed(() => {
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentMonth = now.getMonth() + 1
+  await supabase.from('meters').insert({
+    type: meterType.value,
+    room_id: Number(roomId.value),
+    tenant_id: Number(tenantId.value),
+    date: dateStr,
+    last_reading: last,
+    current_reading: curr,
+    usage: usage,
+    unit_price: unitPrice.value,
+    amount: amount,
+    source: 'tenant'
+  })
 
-  const roomMap = {}, houseMap = {}, tenantMap = {}
-  rooms.value.forEach(r => { roomMap[String(r.id)] = r })
-  houses.value.forEach(h => { houseMap[String(h.id)] = h })
-  tenants.value.forEach(t => { tenantMap[String(t.id)] = t })
-
-  let mWater = 0, mElec = 0, yWater = 0, yElec = 0
-  let mWaterUse = 0, mElecUse = 0, yWaterUse = 0, yElecUse = 0
-  const records = []
-
-  for (const m of meters.value) {
-    if (m.type !== 'electric' && m.type !== 'water') continue
-    const type = m.type
-    const usage = m.usage || 0
-    const amount = m.amount || 0
-    if (usage <= 0 || amount <= 0) continue
-
-    const d = new Date(m.date || m.created_at)
-    const isCurMonth = d.getFullYear() === currentYear && (d.getMonth() + 1) === currentMonth
-    const isCurYear = d.getFullYear() === currentYear
-
-    if (type === 'water') {
-      if (isCurMonth) { mWater += amount; mWaterUse += usage }
-      if (isCurYear) { yWater += amount; yWaterUse += usage }
-    } else {
-      if (isCurMonth) { mElec += amount; mElecUse += usage }
-      if (isCurYear) { yElec += amount; yElecUse += usage }
-    }
-
-    const room = roomMap[String(m.room_id)]
-    const house = room ? houseMap[String(room.house_id)] : null
-    let roomName = room && house ? `${house.address} ${room.room_no}` : (m.room_id || '未知')
-    const tenant = Object.values(tenantMap).find(t => String(t.room_id) === String(m.room_id) && t.status === 'renting')
-    if (tenant) roomName += `（${tenant.name}）`
-
-    records.push({
-      id: m.id, roomId: m.room_id || '', roomName,
-      houseId: room?.house_id || '', type, date: m.date || m.created_at,
-      lastReading: m.lastreading || 0, currentReading: m.currentreading || 0,
-      usage, amount: amount.toFixed(2), source: 'meter', _expanded: false
+  if (usage > 0) {
+    await supabase.from('bills').insert({
+      tenant_id: Number(tenantId.value),
+      room_id: Number(roomId.value),
+      category: meterType.value === 'water' ? '水费' : '电费',
+      bill_month: dateStr.slice(0, 7),
+      total_amount: amount,
+      paid_amount: 0,
+      status: 'pending',
+      direction: 'income',
+      tenant_name: r?.tenantName || '',
+      room_no: r?.roomNo || ''
     })
   }
 
-  for (const b of bills.value) {
-    if (b.category !== '水费' && b.category !== '电费') continue
-    const unpaid = (b.total_amount || 0) - (b.paid_amount || 0)
-    if (unpaid > 0) continue
-    const type = b.category === '水费' ? 'water' : 'electric'
-    const amount = b.total_amount || 0
-    if (amount <= 0) continue
-    const bDate = new Date(b.bill_month + '-01')
-    const isCurMonth = bDate.getFullYear() === currentYear && (bDate.getMonth() + 1) === currentMonth
-    const isCurYear = bDate.getFullYear() === currentYear
+  await supabase.from('tenants').update(
+    meterType.value === 'water' ? { water_reading: curr } : { electric_reading: curr }
+  ).eq('id', tenantId.value)
 
-    if (type === 'water') {
-      if (isCurMonth) mWater += amount
-      if (isCurYear) yWater += amount
-    } else {
-      if (isCurMonth) mElec += amount
-      if (isCurYear) yElec += amount
-    }
+  loadAll()
+  saving.value = false
+  lastReading.value = String(curr)
+  currentReading.value = ''
+  meterUsage.value = '0'
+  meterAmount.value = 0
+  alert('保存成功')
+}
 
-    const room = roomMap[String(b.room_id)]
-    const house = room ? houseMap[String(room.house_id)] : null
-    let roomName = room && house ? `${house.address} ${room.room_no}` : (b.room_no || '未知')
-    const tName = Object.values(tenantMap).find(tn => String(tn.id) === String(b.tenant_id))?.name
-    if (tName) roomName += `（${tName}）`
+const propTarget = ref('')
+const propAmount = ref(0)
+const propCycle = ref('monthly')
+const propDay = ref(1)
 
-    records.push({
-      id: b.id, roomId: b.room_id || '', roomName,
-      houseId: room?.house_id || '', type, date: b.bill_month || '',
-      lastReading: 0, currentReading: 0, usage: 0,
-      amount: amount.toFixed(2), source: 'bill', _expanded: false
-    })
-  }
+const propList = computed(() => propertySettings.value || [])
 
-  records.sort((a, b) => a.date > b.date ? -1 : 1)
+async function saveProperty() {
+  if (!propAmount.value) return alert('请输入金额')
+  if (!propTarget.value) return alert('请选择楼栋')
+  const house = houses.value.find(h => h.id == propTarget.value)
+  await supabase.from('property_settings').insert({
+    mode: 'building',
+    room_id: propTarget.value,
+    target_name: (house?.address || '') + ' 整栋',
+    cycle: propCycle.value,
+    amount: propAmount.value,
+    pay_day: propDay.value,
+    remind_days: 3,
+    next_pay_date: new Date().toISOString().slice(0, 10)
+  })
+  propAmount.value = 0
+  propTarget.value = ''
+  loadAll()
+}
 
-  return {
-    mWater: mWater.toFixed(2), mElec: mElec.toFixed(2),
-    yWater: yWater.toFixed(2), yElec: yElec.toFixed(2),
-    mWaterUse: mWaterUse.toFixed(1), mElecUse: mElecUse.toFixed(1),
-    yWaterUse: yWaterUse.toFixed(1), yElecUse: yElecUse.toFixed(1),
-    allRecords: records
-  }
+async function delProperty(id) {
+  if (!confirm('删除物业费设置？')) return
+  await supabase.from('property_settings').delete().eq('id', id)
+  loadAll()
+}
+
+onMounted(() => {
+  loadAll()
+  unitPrice.value = parseFloat(localStorage.getItem('meterPrice_water') || '5')
 })
-
-const monthWater = computed(() => stats.value.mWater)
-const monthElectric = computed(() => stats.value.mElec)
-const yearWater = computed(() => stats.value.yWater)
-const yearElectric = computed(() => stats.value.yElec)
-const monthWaterUsage = computed(() => stats.value.mWaterUse)
-const monthElectricUsage = computed(() => stats.value.mElecUse)
-const yearWaterUsage = computed(() => stats.value.yWaterUse)
-const yearElectricUsage = computed(() => stats.value.yElecUse)
-
-const filteredRecords = ref([])
-
-function filterRecords() {
-  let list = stats.value.allRecords
-  if (houseId.value) list = list.filter(r => String(r.houseId) === String(houseId.value))
-  if (filterMonth.value) list = list.filter(r => r.date && r.date.startsWith(filterMonth.value))
-  if (searchText.value) {
-    const kw = searchText.value.toLowerCase()
-    list = list.filter(r => r.roomName.toLowerCase().includes(kw))
-  }
-  if (filterType.value === 'water') list = list.filter(r => r.type === 'water')
-  if (filterType.value === 'electric') list = list.filter(r => r.type === 'electric')
-  filteredRecords.value = list
-}
-
-function toggle(idx) {
-  filteredRecords.value[idx]._expanded = !filteredRecords.value[idx]._expanded
-}
-
-async function revert(record) {
-  if (!confirm('确认撤销这条记录？')) return
-  if (record.source === 'meter') {
-    await supabase.from('meters').delete().eq('id', record.id)
-  } else {
-    await supabase.from('bills').update({ status: 'pending', paid_amount: 0, paid_time: null }).eq('id', record.id)
-  }
-  loadAll()
-}
-
-watch(stats, () => filterRecords(), { immediate: true })
 </script>
 
 <style scoped>
-.stat-card.water { border-left: 4px solid #3b82f6; }
-.stat-card.electric { border-left: 4px solid #f59e0b; }
-.stat-sub { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-.filter-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.filter-row .input { flex: 1; min-width: 120px; }
-.meter-card { background: white; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; border: 1px solid #e8ecf1; cursor: pointer; }
-.meter-head { display: flex; align-items: center; gap: 10px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.dot.blue { background: #3b82f6; }
-.dot.yellow { background: #f59e0b; }
-.meter-room { flex: 1; font-size: 14px; }
-.meter-amount { font-weight: 600; }
-.meter-arrow { font-size: 12px; color: #94a3b8; }
-.meter-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid #f1f5f9; }
-.meter-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #64748b; }
-.btn-sm.danger { color: #dc2626; border-color: #fecaca; margin-top: 6px; }
+.main-tabs { display: flex; margin-bottom: 16px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
+.main-tab { flex: 1; text-align: center; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+.main-tab.active { background: white; font-weight: 600; }
+.tab-bar { display: flex; margin-bottom: 14px; background: #f1f5f9; border-radius: 10px; padding: 4px; }
+.tab-item { flex: 1; text-align: center; padding: 8px; border-radius: 8px; cursor: pointer; }
+.tab-item.active { background: white; font-weight: 600; }
+.form-item { margin-bottom: 10px; }
+.form-item label { display: block; font-size: 13px; color: #64748b; margin-bottom: 4px; }
+.form-item .input { width: 100%; }
 </style>

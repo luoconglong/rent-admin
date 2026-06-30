@@ -37,6 +37,12 @@
         <div class="form-item"><label>月租金</label><input v-model.number="rentAmount" type="number" class="input" /></div>
         <div class="form-item"><label>押金</label><input v-model.number="deposit" type="number" class="input" /></div>
       </div>
+
+      <div class="form-item">
+        <label>首期收款</label>
+        <input v-model.number="paidAmount" type="number" class="input" />
+        <span style="color:#999;font-size:13px">实收金额（押金+首期房租）</span>
+      </div>
       
       <div class="form-item">
         <label>缴费周期</label>
@@ -98,6 +104,7 @@ const houseId = ref('')
 const roomId = ref('')
 const rentAmount = ref(0)
 const deposit = ref(0)
+const paidAmount = ref(0)
 const termMonths = ref(12)
 const startDate = ref(new Date().toISOString().slice(0,10))
 const endDate = ref('')
@@ -121,7 +128,7 @@ function onHouseChange() { roomId.value = '' }
 
 const roomList = computed(() => {
   if (!houseId.value) return []
-  return rooms.value.filter(r => r.house_id == houseId.value && (r.status === 'vacant' || r.status === '空置'))
+  return rooms.value.filter(r => r.house_id == houseId.value && r.status === 'vacant')
 })
 
 function onRoomChange() {
@@ -142,20 +149,13 @@ async function save() {
     if (co.phone && co.phone.length !== 11) return alert('同住人 ' + co.name + ' 手机号需11位')
   }
 
+  const paid = paidAmount.value || 0
+  if (!confirm(`首期费用：¥${(deposit.value + (paymentCycle.value === 'quarterly' ? rentAmount.value * 3 : rentAmount.value)).toFixed(2)}\n实收金额：¥${paid.toFixed(2)}\n\n确认入住？`)) return
+
   const now = new Date().toISOString()
   const ds = now.slice(0, 10)
   const room = rooms.value.find(r => r.id == rid)
   const house = houses.value.find(h => h.id == room?.house_id)
-
-  const { data: settings } = await supabase.from('settings').select('key,value')
-  const getSetting = (key, def) => { const s = settings?.find(x => x.key === key); return s ? parseFloat(s.value) : def }
-  const getStr = (key, def) => { const s = settings?.find(x => x.key === key); return s && s.value ? s.value : def }
-
-  const waterPrice = getSetting('meterPrice_water', 5)
-  const electricPrice = getSetting('meterPrice_electric', 1.5)
-  const aptName = getStr('apartmentName', '')
-  const payeeName = getStr('payee', '')
-  const landlordName = aptName && payeeName ? aptName + ' / ' + payeeName : ''
 
   const coList = coOccupants.value.filter(c => c.name.trim())
 
@@ -175,23 +175,41 @@ async function save() {
   await supabase.from('rooms').update({ status: 'rented' }).eq('id', rid)
 
   if (waterReading.value && parseFloat(waterReading.value) > 0) {
-    await supabase.from('meters').insert({ type: 'water', room_id: rid, tenant_id: tenantId, date: ds, action: 'init_reading', last_reading: 0, current_reading: parseFloat(waterReading.value), usage: parseFloat(waterReading.value), amount: parseFloat(waterReading.value) * waterPrice, unit_price: waterPrice })
+    await supabase.from('meters').insert({ type: 'water', room_id: rid, tenant_id: tenantId, date: ds, action: 'init', last_reading: 0, current_reading: parseFloat(waterReading.value), usage: 0, amount: 0, unit_price: 5 })
   }
   if (electricReading.value && parseFloat(electricReading.value) > 0) {
-    await supabase.from('meters').insert({ type: 'electric', room_id: rid, tenant_id: tenantId, date: ds, action: 'init_reading', last_reading: 0, current_reading: parseFloat(electricReading.value), usage: parseFloat(electricReading.value), amount: parseFloat(electricReading.value) * electricPrice, unit_price: electricPrice })
+    await supabase.from('meters').insert({ type: 'electric', room_id: rid, tenant_id: tenantId, date: ds, action: 'init', last_reading: 0, current_reading: parseFloat(electricReading.value), usage: 0, amount: 0, unit_price: 1.5 })
   }
 
   const rentForCycle = paymentCycle.value === 'quarterly' ? rentAmount.value * 3 : rentAmount.value
-  const { error: billErr } = await supabase.from('bills').insert([
-    { tenant_id: tenantId, room_id: rid, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '', title: '房租', category: '房租', total_amount: rentForCycle, paid_amount: 0, status: 'pending', bill_month: startDate.value.slice(0, 7), rent_amount: rentForCycle, deposit: 0, date_range: '' },
-    { tenant_id: tenantId, room_id: rid, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '', title: '押金', category: '押金', total_amount: deposit.value, paid_amount: 0, status: 'pending', bill_month: startDate.value.slice(0, 7), rent_amount: 0, deposit: deposit.value, date_range: '' }
-  ])
+  const depositPaid = Math.min(paid, deposit.value)
+  const rentPaid = Math.min(paid - depositPaid, rentForCycle)
+
+  const billsToInsert = []
+  if (deposit.value > 0) {
+    billsToInsert.push({
+      tenant_id: tenantId, room_id: rid, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '',
+      title: '押金', category: '押金', total_amount: deposit.value, paid_amount: depositPaid,
+      status: depositPaid >= deposit.value ? 'paid' : 'pending',
+      paid_time: depositPaid > 0 ? now : null, bill_month: startDate.value.slice(0, 7),
+      direction: 'deposit', rent_amount: 0, deposit: deposit.value, date_range: ''
+    })
+  }
+  billsToInsert.push({
+    tenant_id: tenantId, room_id: rid, tenant_name: name.value.trim(), room_no: room?.room_no || '', house_address: house?.address || '',
+    title: '房租', category: '房租', total_amount: rentForCycle, paid_amount: rentPaid,
+    status: rentPaid >= rentForCycle ? 'paid' : 'pending',
+    paid_time: rentPaid > 0 ? now : null, bill_month: startDate.value.slice(0, 7),
+    direction: 'income', rent_amount: rentForCycle, deposit: 0, date_range: ''
+  })
+
+  const { error: billErr } = await supabase.from('bills').insert(billsToInsert)
   if (billErr) { alert('账单生成失败：' + billErr.message); return }
 
   if (genContract.value) {
     await supabase.from('contracts').insert({
       tenant_id: tenantId, room_id: rid,
-      template_data: { landlord: landlordName, tenantName: name.value.trim(), idCard: idCard.value, phone: phone.value || '', occupantCount: totalOccupant.value, coOccupants: coList.map(c => ({ name: c.name, phone: c.phone || '', idCard: c.idCard })), rentAmount: rentAmount.value, deposit: deposit.value, startDate: startDate.value, endDate: endDate.value, roomNo: room?.room_no || '' },
+      template_data: { tenantName: name.value.trim(), idCard: idCard.value, phone: phone.value || '', occupantCount: totalOccupant.value, coOccupants: coList.map(c => ({ name: c.name, phone: c.phone || '', idCard: c.idCard })), rentAmount: rentAmount.value, deposit: deposit.value, startDate: startDate.value, endDate: endDate.value, roomNo: room?.room_no || '' },
       status: '待签'
     })
   }
@@ -209,6 +227,7 @@ onMounted(() => {
       houseId.value = r.house_id
       rentAmount.value = Number(r.rent_amount) || 0
       deposit.value = Number(r.deposit) || 0
+      paidAmount.value = (Number(r.rent_amount) || 0) + (Number(r.deposit) || 0)
     }
   }
 })

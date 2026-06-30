@@ -51,7 +51,7 @@
             </tr>
           </tbody>
         </table>
-        <div v-else style="color:#94a3b8;padding:8px 0">暂无房间</div>
+        <div v-else style="color:var(--gray-400);padding:8px 0">暂无房间</div>
 
         <button class="btn-sm danger" @click="delHouse(h.id)">删除楼栋</button>
       </div>
@@ -144,6 +144,7 @@ async function delRoom(id) {
 <style scoped>
 .inline-form, .batch-row { display: flex; gap: 8px; padding: 6px 0; align-items: center; flex-wrap: wrap; }
 .actions { display: flex; gap: 4px; flex-wrap: wrap; }
-.link { color: #1e6f5c; cursor: pointer; text-decoration: underline; }
-.btn-sm.warn { color: #f59e0b; border-color: #fde68a; }
+.house-card { padding: 0; overflow: hidden; }
+.house-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer; user-select: none; font-size: 14px; }
+.house-head:hover { background: var(--gray-50); }
 </style>

@@ -90,7 +90,7 @@
         <div class="form-item">
           <label>房间</label>
           <select v-model="editForm.room_id" class="input">
-            <option v-for="r in allRooms" :key="r.id" :value="r.id">{{ r.houseName }} {{ r.room_no }} ({{ r.status === 'renting' && r.tenant_id !== selectedTenant?.id ? '占用' : '可用' }})</option>
+            <option v-for="r in allRooms" :key="r.id" :value="r.id">{{ r.houseName }} {{ r.room_no }} ({{ r.status === 'rented' && r.tenant_id !== selectedTenant?.id ? '占用' : '可用' }})</option>
           </select>
         </div>
         <div class="form-item"><label>月租金</label><input v-model.number="editForm.rent_amount" type="number" class="input" /></div>
@@ -223,8 +223,8 @@ function selectTenant(id) {
 
   const wm = meters.value.filter(m => String(m.room_id) === String(t.room_id) && m.type === 'water').pop()
   const em = meters.value.filter(m => String(m.room_id) === String(t.room_id) && m.type === 'electric').pop()
-  waterReading.value = wm ? (wm.currentreading || '-') : (t.water_reading || '-')
-  electricReading.value = em ? (em.currentreading || '-') : (t.electric_reading || '-')
+  waterReading.value = wm ? (wm.current_reading || '-') : (t.water_reading || '-')
+  electricReading.value = em ? (em.current_reading || '-') : (t.electric_reading || '-')
 }
 
 function startEdit() { editForm.value = { ...selectedTenant.value }; editing.value = true }
@@ -234,8 +234,8 @@ async function saveEdit() {
   const f = editForm.value
   const oldRoomId = selectedTenant.value.room_id
   if (String(f.room_id) !== String(oldRoomId)) {
-    await supabase.from('rooms').update({ status: '空置', tenant_id: null }).eq('id', oldRoomId)
-    await supabase.from('rooms').update({ status: '在住', tenant_id: selectedTenant.value.id }).eq('id', f.room_id)
+    await supabase.from('rooms').update({ status: 'vacant', tenant_id: null }).eq('id', oldRoomId)
+    await supabase.from('rooms').update({ status: 'rented', tenant_id: selectedTenant.value.id }).eq('id', f.room_id)
   }
   await supabase.from('tenants').update({
     name: f.name, phone: f.phone, room_id: f.room_id,
@@ -275,29 +275,21 @@ function formatTime(t) { if (!t) return '-'; return new Date(t).toLocaleDateStri
 <style scoped>
 .tenant-layout { display: flex; gap: 0; height: calc(100vh - 56px - 40px); }
 .tenant-list { flex: 1; overflow-y: auto; padding-right: 8px; }
-.tenant-drawer { width: 380px; background: #fff; border-left: 1px solid #e8ecf1; overflow-y: auto; padding: 20px; flex-shrink: 0; }
+.tenant-drawer { width: 380px; background: #fff; border-left: 1px solid var(--gray-200); overflow-y: auto; padding: 20px; flex-shrink: 0; }
 .drawer-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.tenant-card { background: white; border-radius: 12px; margin-bottom: 10px; border: 1px solid #e8ecf1; overflow: hidden; cursor: pointer; }
-.tenant-card.selected { border-color: #1e6f5c; background: #eef7f2; }
+.tenant-card { background: white; border-radius: var(--radius); margin-bottom: 10px; border: 1px solid var(--gray-200); overflow: hidden; cursor: pointer; }
+.tenant-card.selected { border-color: var(--primary); background: var(--primary-light); }
 .tenant-main { display: flex; align-items: center; padding: 14px; }
-.tenant-avatar { width: 44px; height: 44px; border-radius: 50%; background: #eef7f2; color: #1e6f5c; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; flex-shrink: 0; margin-right: 12px; }
+.tenant-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--primary-light); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; flex-shrink: 0; margin-right: 12px; }
 .tenant-info { flex: 1; min-width: 0; }
 .tenant-name { font-size: 15px; font-weight: 600; }
-.tenant-room { font-size: 13px; color: #64748b; }
-.tenant-meta { font-size: 12px; color: #94a3b8; display: flex; gap: 8px; }
+.tenant-room { font-size: 13px; color: var(--gray-500); }
+.tenant-meta { font-size: 12px; color: var(--gray-400); display: flex; gap: 8px; }
 .tenant-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .detail-section { margin-bottom: 16px; }
-.detail-section h4 { font-size: 14px; margin-bottom: 8px; color: #1e6f5c; }
-.detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
-.detail-row span:first-child { color: #64748b; }
-.bill-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+.detail-section h4 { font-size: 14px; margin-bottom: 8px; color: var(--primary); }
+.detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--gray-100); font-size: 14px; }
+.detail-row span:first-child { color: var(--gray-500); }
+.bill-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--gray-100); font-size: 13px; }
 .drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.form-item { margin-bottom: 10px; }
-.form-item label { display: block; font-size: 13px; color: #64748b; margin-bottom: 4px; }
-.form-item .input { width: 100%; }
-.btn.danger { color: #dc2626; border-color: #fecaca; }
-.btn-sm.danger { color: #dc2626; border-color: #fecaca; }
-.red { color: #dc2626; }
-.warn { color: #f59e0b; }
-.green { color: #16a34a; }
 </style>

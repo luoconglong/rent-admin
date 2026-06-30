@@ -32,7 +32,7 @@
         <div class="form-item"><label>合同标题</label><input v-model="contractTitle" class="input" @change="saveContractTemplate" /></div>
         <div class="form-item"><label>合同条款</label><textarea v-model="contractClauses" class="input" rows="20" @change="saveContractTemplate"></textarea></div>
         <button class="btn primary" @click="saveContractTemplate">💾 保存模板</button>
-        <span v-if="contractSaved" style="margin-left:10px;color:#16a34a">已保存 ✓</span>
+        <span v-if="contractSaved" class="green" style="margin-left:10px">已保存 ✓</span>
       </div>
     </div>
 
@@ -65,9 +65,13 @@
       </div>
       <div v-if="showBackup">
         <div class="btn-group">
-          <button class="btn" @click="backupCloud">☁️ 云端备份</button><button class="btn" @click="restoreCloud">📥 云端恢复</button>
-          <button class="btn" @click="backupLocal">💻 本地备份</button><button class="btn" @click="restoreLocal">📂 本地恢复</button>
-          <button class="btn" @click="exportAll">📤 导出全部</button><button class="btn" @click="importData">📥 导入数据</button>
+          <button class="btn" @click="backupCloud">☁️ 云端备份</button>
+          <button class="btn" @click="restoreCloud">📥 云端恢复</button>
+          <button class="btn" @click="backupLocal">💻 本地备份</button>
+          <button class="btn" @click="restoreLocal">📂 本地恢复</button>
+          <button class="btn" @click="exportAll">📤 导出全部</button>
+          <button class="btn" @click="importData">📥 导入数据</button>
+          <button class="btn danger" @click="resetAll">🔄 重置为默认</button>
         </div>
         <div class="form-item" style="margin-top:12px"><label>备份备注</label><input v-model="backupNote" class="input" placeholder="可选备注" /></div>
         <div v-if="backupList.length" style="margin-top:12px"><h4>备份记录</h4>
@@ -157,20 +161,55 @@ function restoreLocal() { const input = document.createElement('input'); input.t
 function exportAll() { backupLocal() }
 function importData() { restoreLocal() }
 async function testDing() { if (!dingClientId.value || !dingClientSecret.value) { dingStatus.value = '请填写完整配置'; return }; dingStatus.value = '连接中...'; setTimeout(() => { dingStatus.value = Math.random() > 0.3 ? '连接成功' : '连接失败' }, 1500) }
+
+async function resetAll() {
+  if (!confirm('⚠️ 重置为默认将清空所有数据。\n\n重置前会自动备份到云端，确认继续？')) return
+  if (!confirm('再次确认：清空所有业务数据？')) return
+
+  const [houses, rooms, tenants, bills, meters, expends, owners, settings] = await Promise.all([
+    supabase.from('houses').select('*'),
+    supabase.from('rooms').select('*'),
+    supabase.from('tenants').select('*'),
+    supabase.from('bills').select('*'),
+    supabase.from('meters').select('*'),
+    supabase.from('expends').select('*'),
+    supabase.from('owners').select('*'),
+    supabase.from('settings').select('*')
+  ])
+  await supabase.from('backups').insert({
+    user_id: 'fm780913',
+    backup_data: {
+      houses: houses.data, rooms: rooms.data, tenants: tenants.data,
+      bills: bills.data, meters: meters.data, expends: expends.data,
+      owners: owners.data, settings: settings.data
+    },
+    note: '重置前自动备份',
+    created_at: new Date().toISOString()
+  })
+
+  const tables = ['houses', 'rooms', 'tenants', 'bills', 'meters', 'expends', 'owners']
+  for (const table of tables) {
+    await supabase.from(table).delete().neq('id', '000')
+  }
+
+  const defaults = [
+    { key: 'apartmentName', value: '租务小帮手' },
+    { key: 'globalRemindDays', value: '3' },
+    { key: 'pricePropertyWater', value: '5.0' },
+    { key: 'pricePropertyElectric', value: '1.5' },
+    { key: 'priceMeterWater', value: '5.0' },
+    { key: 'priceMeterElectric', value: '1.5' },
+  ]
+  for (const d of defaults) {
+    await supabase.from('settings').upsert({ key: d.key, value: d.value }, { onConflict: 'key' })
+  }
+
+  alert('已重置为默认，备份已保存到云端。\n如需恢复，请在数据管理中点"云端恢复"。')
+  await loadAll()
+  location.reload()
+}
 </script>
 
 <style scoped>
-.card { margin-bottom: 16px; }
-.card-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-h3 { margin-bottom: 12px; font-size: 15px; }
-.form-item { margin-bottom: 10px; }
-.form-item label { display: block; font-size: 13px; color: #64748b; margin-bottom: 4px; }
-.form-row { display: flex; gap: 16px; }
-.form-row .form-item { flex: 1; }
-.btn-group { display: flex; flex-wrap: wrap; gap: 8px; }
-.backup-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
-.ding-status { margin-left: 10px; font-size: 13px; }
-.ding-status.green { color: #16a34a; }
-.ding-status.red { color: #dc2626; }
-textarea.input { min-height: 400px; resize: vertical; }
+.backup-item { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--gray-100); font-size: 13px; }
 </style>
