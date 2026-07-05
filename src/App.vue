@@ -1,10 +1,8 @@
 <template>
-  <!-- 租客自助模式：纯净页面，无侧边栏 -->
   <div v-if="isTenantSelfMode" class="tenant-self-only">
     <TenantSelf />
   </div>
 
-  <!-- 恢复码登录 -->
   <div class="login-page" v-else-if="!userIdVerified">
     <div class="login-card">
       <h1>🏢 租务小帮手</h1>
@@ -21,6 +19,7 @@
       <div class="logo">🏢 租务小帮手</div>
       <div class="header-right">
         <span class="user-badge">👤 房东</span>
+        <button class="btn-logout" @click="showSwitchDialog = true">切换账号</button>
         <button class="btn-logout" @click="handleLogout">退出</button>
       </div>
     </header>
@@ -51,6 +50,22 @@
         <CheckoutPage v-if="current === 'checkout'" :tenantId="checkoutTenantId" @close="current = 'dashboard'" />
         <Settings v-if="current === 'settings'" />
       </section>
+    </div>
+
+    <!-- 切换账号弹窗 -->
+    <div class="mask" v-if="showSwitchDialog" @click.self="showSwitchDialog = false">
+      <div class="dialog">
+        <h3>切换账号</h3>
+        <div class="form-item">
+          <label>输入账号ID（恢复码）</label>
+          <input v-model="switchInput" class="input" placeholder="请输入账号ID" @keyup.enter="doSwitchAccount" />
+        </div>
+        <p class="error" v-if="switchError">{{ switchError }}</p>
+        <div class="dialog-btns">
+          <button class="btn" @click="showSwitchDialog = false">取消</button>
+          <button class="btn primary" @click="doSwitchAccount" :disabled="switching">{{ switching ? '切换中...' : '确认切换' }}</button>
+        </div>
+      </div>
     </div>
 
     <div class="mask" v-if="dialog.show" @click.self="dialog.show = false">
@@ -130,6 +145,10 @@ const userIdVerified = ref(false)
 const restoreCode = ref('')
 const restoreError = ref('')
 const restoring = ref(false)
+const showSwitchDialog = ref(false)
+const switchInput = ref('')
+const switchError = ref('')
+const switching = ref(false)
 
 const isTenantSelfMode = computed(() => {
   const params = new URLSearchParams(window.location.search)
@@ -144,6 +163,20 @@ function openCheckin(roomId) {
 function doCheckout(tenantId) {
   checkoutTenantId.value = String(tenantId)
   current.value = 'checkout'
+}
+
+async function doSwitchAccount() {
+  switchError.value = ''
+  if (!switchInput.value.trim()) { switchError.value = '请输入账号ID'; return }
+  switching.value = true
+  const userId = switchInput.value.trim()
+  const { data: check } = await supabase.from('houses').select('id').eq('user_id', userId).limit(1)
+  switching.value = false
+  if (!check || check.length === 0) { switchError.value = '账号不存在或无数据'; return }
+  localStorage.setItem('userId', userId)
+  switchInput.value = ''
+  showSwitchDialog.value = false
+  loadAll()
 }
 
 const menus = [
@@ -200,22 +233,10 @@ async function verifyRestoreCode() {
   restoreError.value = ''
   if (!restoreCode.value.trim()) { restoreError.value = '请输入恢复码'; return }
   restoring.value = true
-
   const userId = restoreCode.value.trim()
-
-  const { data: check } = await supabase
-    .from('houses')
-    .select('id')
-    .eq('user_id', userId)
-    .limit(1)
-
+  const { data: check } = await supabase.from('houses').select('id').eq('user_id', userId).limit(1)
   restoring.value = false
-
-  if (!check || check.length === 0) {
-    restoreError.value = '恢复码无效或无数据'
-    return
-  }
-
+  if (!check || check.length === 0) { restoreError.value = '恢复码无效或无数据'; return }
   localStorage.setItem('userId', userId)
   userIdVerified.value = true
   loadAll()
@@ -228,19 +249,11 @@ function handleLogout() {
 }
 
 onMounted(() => {
-  if (isTenantSelfMode.value) return  // 租客自助模式不做任何初始化
-
+  if (isTenantSelfMode.value) return
   const saved = localStorage.getItem('userId')
-  if (saved) {
-    restoreCode.value = saved
-    verifyRestoreCode()
-  }
-
+  if (saved) { restoreCode.value = saved; verifyRestoreCode() }
   const params = new URLSearchParams(window.location.search)
-  if (params.get('page') === 'checkout') {
-    current.value = 'checkout'
-    checkoutTenantId.value = params.get('tenantId')
-  }
+  if (params.get('page') === 'checkout') { current.value = 'checkout'; checkoutTenantId.value = params.get('tenantId') }
 })
 </script>
 

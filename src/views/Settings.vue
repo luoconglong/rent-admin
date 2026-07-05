@@ -36,7 +36,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" v-if="isMainAccount">
       <div class="card-head" @click="showAdmin = !showAdmin">
         <h3>🔐 管理员中心</h3><span>{{ showAdmin ? '▲' : '▼' }}</span>
       </div>
@@ -99,7 +99,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { supabase } from '../supabase.js'
 import { loadAll } from '../stores/data.js'
 
@@ -112,6 +112,11 @@ const contractSaved = ref(false)
 const backupNote = ref(''), backupList = ref([])
 const dingClientId = ref(''), dingClientSecret = ref(''), dingStatus = ref('')
 const codeHistory = ref([]), monthIncome = ref(0), totalIncome = ref(0), activeCount = ref(0), expiringCount = ref(0)
+
+const isMainAccount = ref(localStorage.getItem('userId') === 'fm780913')
+watch(() => localStorage.getItem('userId'), (val) => {
+  isMainAccount.value = (val === 'fm780913')
+})
 
 function formatDate2(t) { return t ? new Date(t).toLocaleDateString('zh-CN') : '-' }
 
