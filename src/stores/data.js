@@ -116,7 +116,6 @@ export function calcStats() {
   stats.expiringCount = expiringCount
   stats.vacantCount = rooms.value.filter(r => r.status === 'vacant').length
 
-  // 本月已收 = bills 中 direction=income 且本月 paid 的金额
   const cm = today.getMonth() + 1; const cy = today.getFullYear()
   let mi = 0
   for (const b of bills.value) {
@@ -176,8 +175,15 @@ export async function loadAll() {
   if (b.status === 'rejected') console.error('bills 查询失败:', b.reason)
   if (e.status === 'rejected') console.error('expends 查询失败:', e.reason)
 
-  const { data: settings } = await supabase.from('settings').select('*').eq('key', 'globalRemindDays').single()
-  if (settings) globalRemindDays.value = Number(settings.value) || 3
+  const { data: allSettings } = await supabase.from('settings').select('*')
+  if (allSettings) {
+    const apName = allSettings.find(s => s.key === 'apartmentName_' + userId || s.key === 'apartmentName')
+    if (apName) localStorage.setItem('apartmentName_' + userId, apName.value)
+    const payee = allSettings.find(s => s.key === 'payeeName_' + userId)
+    if (payee) localStorage.setItem('payeeName_' + userId, payee.value)
+    const remind = allSettings.find(s => s.key === 'globalRemindDays')
+    if (remind) globalRemindDays.value = Number(remind.value) || 3
+  }
 
   calcStats()
 }

@@ -152,7 +152,13 @@ onMounted(async () => {
   loadBackups(); loadCodeHistory()
 })
 
-async function saveSetting(key, value) { await supabase.from('settings').upsert({ key, value: String(value) }, { onConflict: 'key' }) }
+async function saveSetting(key, value) { 
+  await supabase.from('settings').upsert({ key, value: String(value) }, { onConflict: 'key' })
+  if (key === 'apartmentName') {
+    const userId = localStorage.getItem('userId') || 'fm780913'
+    localStorage.setItem('apartmentName_' + userId, value)
+  }
+}
 function saveRemindDays() { saveSetting('globalRemindDays', remindDays.value) }
 function savePrice(key, val) { saveSetting(key, val) }
 async function saveContractTemplate() { await saveSetting('contractTitle', contractTitle.value); await saveSetting('contractClauses', contractClauses.value); contractSaved.value = true; setTimeout(() => contractSaved.value = false, 2000) }
