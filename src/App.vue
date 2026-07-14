@@ -16,7 +16,7 @@
 
   <div id="app" v-else>
     <header class="header">
-      <div class="logo">🏢 租务小帮手</div>
+      <div class="logo">🏢 {{ apartmentName }}</div>
       <div class="header-right">
         <span class="user-badge">👤 房东</span>
         <button class="btn-logout" @click="showSwitchDialog = true">切换账号</button>
@@ -52,7 +52,6 @@
       </section>
     </div>
 
-    <!-- 切换账号弹窗 -->
     <div class="mask" v-if="showSwitchDialog" @click.self="showSwitchDialog = false">
       <div class="dialog">
         <h3>切换账号</h3>
@@ -150,6 +149,12 @@ const switchInput = ref('')
 const switchError = ref('')
 const switching = ref(false)
 
+function getApartmentName() {
+  const userId = localStorage.getItem('userId') || 'fm780913'
+  return localStorage.getItem('apartmentName_' + userId) || '租务小帮手'
+}
+const apartmentName = ref(getApartmentName())
+
 const isTenantSelfMode = computed(() => {
   const params = new URLSearchParams(window.location.search)
   return params.get('page') === 'tenantself'
@@ -176,6 +181,7 @@ async function doSwitchAccount() {
   localStorage.setItem('userId', userId)
   switchInput.value = ''
   showSwitchDialog.value = false
+  apartmentName.value = getApartmentName()
   loadAll()
 }
 
@@ -239,6 +245,7 @@ async function verifyRestoreCode() {
   if (!check || check.length === 0) { restoreError.value = '恢复码无效或无数据'; return }
   localStorage.setItem('userId', userId)
   userIdVerified.value = true
+  apartmentName.value = getApartmentName()
   loadAll()
 }
 
