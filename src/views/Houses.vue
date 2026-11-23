@@ -17,6 +17,12 @@
       <div class="house-head" @click="expanded = expanded === h.id ? null : h.id">
         <strong>{{ h.address }}</strong>
         <span>{{ h.rooms.length }} 间 | 在住 {{ h.rentedCount }} | 空置 {{ h.vacantCount }} | 月租 ¥{{ h.monthlyRent }} | 押金 ¥{{ h.totalDeposit }}</span>
+        
+        <!-- 导出按钮 -->
+        <button class="btn-sm export-btn" @click.stop="exportHouseData(h.id)">
+          📥 导出表格
+        </button>
+        
         <span style="margin-left:auto">{{ expanded === h.id ? '▲' : '▼' }}</span>
       </div>
 
@@ -98,6 +104,74 @@ const houseList = computed(() => {
   })
 })
 
+// 【核心新增】：导出表格逻辑（带房号排序）
+function exportHouseData(houseId) {
+  // 1. 找到属于该楼栋的所有房间
+  const houseRooms = rooms.value.filter(r => String(r.house_id) === String(houseId))
+  const roomIds = houseRooms.map(r => String(r.id))
+
+  // 2. 找到该楼栋下，当前在租的租客
+  const activeTenants = tenants.value.filter(t => 
+    t.status === 'renting' && roomIds.includes(String(t.room_id))
+  )
+
+  if (activeTenants.length === 0) {
+    alert('该楼栋目前没有在租租客，无法导出')
+    return
+  }
+
+  // 3. 准备导出数据
+  const exportData = []
+  activeTenants.forEach(tenant => {
+    const room = houseRooms.find(r => String(r.id) === String(tenant.room_id))
+    const roomNo = room ? (room.room_no || room.roomNo || '') : ''
+    
+    exportData.push({
+      roomNo: roomNo,
+      name: tenant.name || '',
+      phone: tenant.phone || '',
+      startDate: tenant.start_date || '',
+      rent: tenant.rent_amount || 0,
+      deposit: tenant.deposit || 0
+    })
+  })
+
+  // 4. 排序逻辑：按房号从小到大
+  exportData.sort((a, b) => {
+    const numA = parseInt(a.roomNo)
+    const numB = parseInt(b.roomNo)
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB
+    }
+    return a.roomNo.localeCompare(b.roomNo)
+  })
+
+  // 5. 准备 CSV 表头
+  let csvContent = "\uFEFF" // 加上 BOM 头防止 Excel 打开乱码
+  csvContent += "房间号,租客姓名,手机号,入住时间,月租金,押金\n"
+
+  // 6. 拼装数据行
+  exportData.forEach(item => {
+    const row = `"${item.roomNo}","${item.name}","${item.phone}","${item.startDate}","${item.rent}","${item.deposit}"`
+    csvContent += row + "\n"
+  })
+
+  // 7. 生成文件并触发下载
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  
+  const targetHouse = houses.value.find(h => String(h.id) === String(houseId))
+  const fileName = `${targetHouse ? targetHouse.address : '楼栋'}_租客信息表.csv`
+  
+  link.setAttribute('download', fileName)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 async function addHouse() {
   if (!newHouse.value.trim()) return alert('请输入楼栋名称')
   await supabase.from('houses').insert({ address: newHouse.value.trim() })
@@ -147,4 +221,19 @@ async function delRoom(id) {
 .house-card { padding: 0; overflow: hidden; }
 .house-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer; user-select: none; font-size: 14px; }
 .house-head:hover { background: var(--gray-50); }
+
+/* 导出按钮样式 */
+.export-btn {
+  background-color: #07c160;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 10px;
+}
+.export-btn:hover {
+  background-color: #06ad56;
+}
 </style>

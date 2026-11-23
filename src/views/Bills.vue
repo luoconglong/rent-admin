@@ -4,10 +4,43 @@
       <h2>💰 账单管理</h2>
       <div class="head-btns">
         <button class="btn primary" @click="generate">📅 生成本月账单</button>
-        <select v-model="exportCategory" class="input" style="width:auto" @change="exportCSV">
-          <option value="">📥 导出全部</option>
-          <option v-for="c in categories.filter(x => x !== '全部')" :key="c" :value="c">{{ c }}</option>
-        </select>
+        <button class="btn success" @click="toggleExportPanel" style="margin-left: 10px;">
+          {{ showExportPanel ? '收起导出面板' : '📥 组合导出（按月+分类）' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 月份与分类组合筛选面板 -->
+    <div v-if="showExportPanel" class="card export-panel">
+      <div class="panel-section">
+        <div class="panel-head">
+          <strong>📅 选择月份（多选）：</strong>
+          <button class="btn-sm" @click="toggleSelectAllMonths">{{ isAllMonthsSelected ? '取消全选' : '全选' }}</button>
+        </div>
+        <div class="checkbox-group">
+          <label v-for="m in availableMonths" :key="m" class="check-label">
+            <input type="checkbox" :value="m" v-model="selectedMonths" />
+            {{ m }}
+          </label>
+        </div>
+      </div>
+
+      <div class="panel-section" style="margin-top: 16px;">
+        <div class="panel-head">
+          <strong>🏷️ 选择分类（多选，不勾=全部）：</strong>
+          <button class="btn-sm" @click="toggleSelectAllCategories">{{ isAllCategoriesSelected ? '取消全选' : '全选' }}</button>
+        </div>
+        <div class="checkbox-group">
+          <label v-for="c in availableCategories" :key="c" class="check-label">
+            <input type="checkbox" :value="c" v-model="selectedCategories" />
+            {{ c }}
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-top: 20px; display: flex; gap: 10px;">
+        <button class="btn primary" @click="exportWithFilters">📥 确认导出选中数据</button>
+        <button class="btn" @click="resetFilters">重置选择</button>
       </div>
     </div>
 
@@ -16,6 +49,7 @@
       <span :class="['tab-item', { active: tab === 'paid' }]" @click="tab = 'paid'">已收账单</span>
     </div>
 
+    <!-- ===================== 待收账单区 ===================== -->
     <div v-if="tab === 'pending'">
       <div v-if="pendingBills.length === 0" class="empty">暂无待收账单</div>
 
@@ -48,6 +82,7 @@
       </div>
     </div>
 
+    <!-- ===================== 已收账单区 ===================== -->
     <div v-if="tab === 'paid'">
       <div class="stat-grid" style="margin-bottom:16px;">
         <div class="stat-card"><div class="stat-num">¥{{ monthTotal }}</div><div class="stat-label">本月收入</div></div>
@@ -87,8 +122,47 @@ import { bills, tenants, rooms, houses, expends, loadAll } from '../stores/data.
 import { supabase } from '../supabase.js'
 
 const tab = ref('pending')
-const exportCategory = ref('')
 
+// ================= 导出筛选状态 =================
+const showExportPanel = ref(false)
+const selectedMonths = ref([])
+const selectedCategories = ref([])
+
+// 可选月份列表
+const availableMonths = computed(() => {
+  const months = bills.value.map(b => b.bill_month || b.billMonth).filter(m => m)
+  return [...new Set(months)].sort().reverse()
+})
+
+// 可选分类列表
+const availableCategories = computed(() => {
+  const cats = bills.value.map(b => b.category).filter(c => c)
+  return [...new Set(cats)]
+})
+
+const isAllMonthsSelected = computed(() => {
+  return selectedMonths.value.length === availableMonths.value.length && availableMonths.value.length > 0
+})
+const isAllCategoriesSelected = computed(() => {
+  return selectedCategories.value.length === availableCategories.value.length && availableCategories.value.length > 0
+})
+
+const toggleExportPanel = () => {
+  showExportPanel.value = !showExportPanel.value
+}
+
+const toggleSelectAllMonths = () => {
+  selectedMonths.value = isAllMonthsSelected.value ? [] : [...availableMonths.value]
+}
+const toggleSelectAllCategories = () => {
+  selectedCategories.value = isAllCategoriesSelected.value ? [] : [...availableCategories.value]
+}
+const resetFilters = () => {
+  selectedMonths.value = []
+  selectedCategories.value = []
+}
+
+// ================= 待收账单 =================
 const pendingBills = computed(() => {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   return bills.value
@@ -121,7 +195,6 @@ const groupState = reactive([
 
 const pendingGroups = computed(() => {
   groupState.forEach(g => { g.list = []; g.total = '0' })
-
   for (const b of pendingBills.value) {
     const d = b.diffDays
     let group
@@ -133,11 +206,9 @@ const pendingGroups = computed(() => {
     else group = groupState[4]
     group.list.push(b)
   }
-
   groupState.forEach(g => {
     g.total = g.list.reduce((s, b) => s + b.amount, 0).toFixed(2)
   })
-
   return groupState.filter(g => g.list.length > 0)
 })
 
@@ -151,6 +222,7 @@ function urgencyText(b) {
   return `${d}天后`
 }
 
+// ================= 已收账单 =================
 const activeCategory = ref('全部')
 const searchKeyword = ref('')
 const filteredPaid = ref([])
@@ -247,6 +319,7 @@ function filterPaid() {
 
 watch(paidBills, () => filterPaid(), { immediate: true })
 
+// ================= 数据操作 =================
 async function generate() {
   const month = new Date().toISOString().slice(0, 7)
   const active = tenants.value.filter(t => t.status === 'renting')
@@ -276,24 +349,108 @@ async function delBill(id) {
   loadAll()
 }
 
-function exportCSV() {
-  let data
-  if (tab.value === 'pending') {
-    data = pendingBills.value
-  } else {
-    data = exportCategory.value
-      ? paidBills.value.filter(b => b.category === exportCategory.value)
-      : filteredPaid.value
+// ================= 核心导出逻辑 =================
+const exportWithFilters = () => {
+  if (selectedMonths.value.length === 0) {
+    return alert('请至少勾选一个月份！')
   }
-  if (!data.length) return alert('没有可导出的数据')
-  let csv = '租客,房间,类型,月份,金额,状态\n'
-  data.forEach(b => {
-    csv += `${b.tenantName},${b.roomNo || b.houseAddress + ' ' + b.roomNo},${b.category},${b.bill_month || ''},${b.amount},${tab.value === 'pending' ? '待收' : '已收'}\n`
+
+  // 映射表
+  const roomMap = {}
+  rooms.value.forEach(r => { roomMap[String(r.id)] = r })
+  const houseMap = {}
+  houses.value.forEach(h => { houseMap[String(h.id)] = h })
+  const tenantMap = {}
+  tenants.value.forEach(t => { tenantMap[String(t.id)] = t })
+
+  let data = bills.value.filter(b => {
+    const month = b.bill_month || b.billMonth
+    const category = b.category
+    const monthMatch = selectedMonths.value.includes(month)
+    const categoryMatch = selectedCategories.value.length === 0 || selectedCategories.value.includes(category)
+    
+    if (!monthMatch || !categoryMatch) return false
+
+    // 【终极绝杀】：只要该账单的租客状态是 moved（退房），不管他付没付钱，统统不准导出！
+    const tenant = tenantMap[String(b.tenant_id)]
+    if (tenant && (tenant.status === 'moved' || tenant.status === 'checked_out')) {
+      return false
+    }
+
+    // 拦截退租结算和押金抵扣
+    if (b.category === '退租结算' || b.category === '押金抵扣-房租') {
+       return false
+    }
+
+    return true
   })
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+
+  if (data.length === 0) {
+    return alert('选中的条件没有匹配到任何账单数据')
+  }
+
+  // 排序：先按月，再按楼栋，最后按房号
+  data.sort((a, b) => {
+    const monthA = a.bill_month || a.billMonth || ''
+    const monthB = b.bill_month || b.billMonth || ''
+    if (monthA !== monthB) return monthA.localeCompare(monthB)
+
+    const roomA = roomMap[String(a.room_id)]
+    const roomB = roomMap[String(b.room_id)]
+    
+    const houseA = roomA ? roomA.house_id : ''
+    const houseB = roomB ? roomB.house_id : ''
+    if (houseA !== houseB) return String(houseA).localeCompare(String(houseB))
+
+    const noA = roomA ? roomA.room_no : ''
+    const noB = roomB ? roomB.room_no : ''
+    return (noA || '').localeCompare(noB || '')
+  })
+
+  // 生成 CSV
+  let csvContent = "\uFEFF"
+  csvContent += "账单月份,楼栋/地址,房间号,租客姓名,费用类别,账单金额,已付金额,待收金额,状态,收租日,到期日\n"
+
+  data.forEach(b => {
+    const month = b.bill_month || b.billMonth || ''
+    const room = roomMap[String(b.room_id)]
+    const house = room ? houseMap[String(room.house_id)] : null
+    const houseAddress = house ? (house.address || '') : ''
+    const realRoomNo = room ? room.room_no : (b.room_no || '-')
+    
+    const tenantName = b.tenant_name || b.tenantName || '-'
+    const category = b.category || ''
+    const total = b.total_amount || b.totalAmount || 0
+    const paid = b.paid_amount || b.paidAmount || 0
+    const unpaid = (total - paid).toFixed(2)
+    const status = b.status === 'paid' ? '已付清' : '待收'
+    const dueDate = b.due_date || b.dueDate || ''
+
+    let payDay = '-'
+    const tenant = tenantMap[String(b.tenant_id)]
+    if (tenant && tenant.payment_day) {
+      payDay = tenant.payment_day
+    } else if (b.pay_day || b.payment_day) {
+      payDay = b.pay_day || b.payment_day
+    }
+    const payDayStr = (payDay && payDay !== '-') ? `${payDay}号` : '-'
+
+    const row = `"\t${month}","${houseAddress}","${realRoomNo}","${tenantName}","${category}","${total}","${paid}","${unpaid}","${status}","${payDayStr}","${dueDate}"`
+    csvContent += row + "\n"
+  })
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = `账单_${exportCategory.value || tab.value}_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  const link = document.createElement('a')
+  link.href = url
+  
+  const monthStr = selectedMonths.value.length > 2 ? `${selectedMonths.value.length}个月份` : selectedMonths.value.join('_')
+  const catStr = selectedCategories.value.length === 0 ? '全分类' : (selectedCategories.value.length > 2 ? '多分类' : selectedCategories.value.join('_'))
+  
+  link.setAttribute('download', `账单导出_${monthStr}_${catStr}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
   URL.revokeObjectURL(url)
 }
 
@@ -304,6 +461,16 @@ function formatTime(t) {
 </script>
 
 <style scoped>
+.page-head { display: flex; justify-content: space-between; align-items: center; }
+.head-btns { display: flex; align-items: center; }
+
+/* 导出面板样式 */
+.export-panel { margin-bottom: 16px; padding: 16px; }
+.panel-section { margin-bottom: 12px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.checkbox-group { display: flex; flex-wrap: wrap; gap: 12px; }
+.check-label { display: flex; align-items: center; gap: 4px; font-size: 14px; cursor: pointer; }
+
 .group-card { margin-bottom: 12px; }
 .group-head { display: flex; justify-content: space-between; align-items: center; padding: 14px; cursor: pointer; font-size: 14px; font-weight: 600; user-select: none; }
 .group-head:hover { background: var(--gray-50); }
