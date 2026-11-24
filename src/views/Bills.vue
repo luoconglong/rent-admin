@@ -128,13 +128,11 @@ const showExportPanel = ref(false)
 const selectedMonths = ref([])
 const selectedCategories = ref([])
 
-// 可选月份列表
 const availableMonths = computed(() => {
   const months = bills.value.map(b => b.bill_month || b.billMonth).filter(m => m)
   return [...new Set(months)].sort().reverse()
 })
 
-// 可选分类列表
 const availableCategories = computed(() => {
   const cats = bills.value.map(b => b.category).filter(c => c)
   return [...new Set(cats)]
@@ -409,7 +407,7 @@ const exportWithFilters = () => {
 
   // 生成 CSV
   let csvContent = "\uFEFF"
-  csvContent += "账单月份,楼栋/地址,房间号,租客姓名,费用类别,账单金额,已付金额,待收金额,状态,收租日,到期日\n"
+  csvContent += "账单月份,楼栋/地址,房间号,租客姓名,费用类别,账单金额,已付金额,待收金额,状态,收租日,账单周期,到期日\n"
 
   data.forEach(b => {
     const month = b.bill_month || b.billMonth || ''
@@ -426,16 +424,32 @@ const exportWithFilters = () => {
     const status = b.status === 'paid' ? '已付清' : '待收'
     const dueDate = b.due_date || b.dueDate || ''
 
-    let payDay = '-'
     const tenant = tenantMap[String(b.tenant_id)]
-    if (tenant && tenant.payment_day) {
-      payDay = tenant.payment_day
-    } else if (b.pay_day || b.payment_day) {
-      payDay = b.pay_day || b.payment_day
+    let payDay = tenant?.payment_day || b.pay_day || b.payment_day || 1
+
+    // 【终极修复】：直接读取数据库里存好的 date_range！
+    // 如果数据库里存了 12-25 至 03-24，这里出来的就是 12-25 至 03-24
+    let finalRangeStr = b.date_range || b.dateRange || ''
+    
+    if (!finalRangeStr && month) {
+       // 如果数据库实在没存（NULL），才走兜底逻辑算一个单月周期
+       const parts = month.split('-')
+       if (parts.length >= 2) {
+          let y = parseInt(parts[0])
+          let m = parseInt(parts[1])
+          let startObj = new Date(y, m - 1, payDay)
+          let endObj = new Date(y, m, payDay - 1)
+          const startStr = String(startObj.getMonth() + 1).padStart(2, '0') + '-' + String(startObj.getDate()).padStart(2, '0')
+          const endStr = String(endObj.getMonth() + 1).padStart(2, '0') + '-' + String(endObj.getDate()).padStart(2, '0')
+          finalRangeStr = startStr + ' 至 ' + endStr
+       }
     }
+    
+    if (!finalRangeStr) finalRangeStr = '-'
+
     const payDayStr = (payDay && payDay !== '-') ? `${payDay}号` : '-'
 
-    const row = `"\t${month}","${houseAddress}","${realRoomNo}","${tenantName}","${category}","${total}","${paid}","${unpaid}","${status}","${payDayStr}","${dueDate}"`
+    const row = `"\t${month}","${houseAddress}","${realRoomNo}","${tenantName}","${category}","${total}","${paid}","${unpaid}","${status}","${payDayStr}","${finalRangeStr}","${dueDate}"`
     csvContent += row + "\n"
   })
 
